@@ -34,7 +34,9 @@ class Settings:
     data_dir: Path
     database_path: Path
     model_api_key: str | None = None
+    model_api_key_file: Path | None = None
     model_base_url: str | None = None
+    model_name: str = "deepseek-flash"
 
     @classmethod
     def from_env(cls, environ: Mapping[str, str] | None = None) -> Settings:
@@ -44,13 +46,16 @@ class Settings:
         log_level = _choice(source, "LOG_LEVEL", LOG_LEVELS, "INFO", upper=True)
         data_dir = Path(_value(source, "DATA_DIR") or DEFAULT_DATA_DIR)
         database_path = _value(source, "DATABASE_PATH")
+        key_file = _value(source, "MODEL_API_KEY_FILE")
         return cls(
             environment=environment,
             log_level=log_level,
             data_dir=data_dir,
             database_path=Path(database_path) if database_path else data_dir / "printcare.sqlite3",
             model_api_key=_value(source, "MODEL_API_KEY") or None,
+            model_api_key_file=Path(key_file) if key_file else None,
             model_base_url=_value(source, "MODEL_BASE_URL") or None,
+            model_name=_value(source, "MODEL_NAME") or "deepseek-flash",
         )
 
     def describe(self) -> dict[str, object]:
@@ -61,12 +66,38 @@ class Settings:
             "data_dir": str(self.data_dir),
             "database_path": str(self.database_path),
             "model_api_key_present": bool(self.model_api_key),
+            "model_api_key_file": str(self.model_api_key_file) if self.model_api_key_file else None,
             "model_base_url": self.model_base_url,
+            "model_name": self.model_name,
         }
 
 
 def _value(environ: Mapping[str, str], name: str) -> str:
     return environ.get(ENV_PREFIX + name, "").strip()
+
+
+def resolve_model_api_key(
+    settings: Settings,
+    default_file: Path | None = None,
+) -> str:
+    """Resolve the API key from the environment, an explicit file, or a local default.
+
+    The key is returned only in memory and never written to logs.
+    """
+    if settings.model_api_key:
+        return settings.model_api_key
+    candidates = [settings.model_api_key_file, default_file or Path("runtime/model_key.txt")]
+    for candidate in candidates:
+        if candidate is None:
+            continue
+        path = Path(candidate)
+        if path.is_file():
+            value = path.read_text(encoding="utf-8").strip()
+            if value:
+                return value
+    raise ConfigError(
+        "未配置模型密钥：设置 PRINTCARE_MODEL_API_KEY，或把 Key 写入 runtime/model_key.txt"
+    )
 
 
 def _choice(
