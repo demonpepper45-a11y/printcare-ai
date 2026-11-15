@@ -218,3 +218,22 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# PrintCare AI: local secrets and runtime artifacts
+.env.*
+!.env.example
+.streamlit/secrets.*.toml
+data/raw/
+data/processed/
+data/private/
+chroma_db/
+runtime/
+logs/
+backups/
+*.sqlite
+*.sqlite-*
+*.sqlite3
+*.sqlite3-*
+*.db
+*.db-*
+.worktrees/
