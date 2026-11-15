@@ -125,5 +125,28 @@ class TemplateNoiseTest(unittest.TestCase):
         self.assertEqual([chunk.text for chunk in parsed.chunks], ["Same paragraph."])
 
 
+class ForeignModelSectionTest(unittest.TestCase):
+    """Other-model maintenance sections embedded in an A1 page must be dropped."""
+
+    HTML = (
+        '<template slot="contents"><div>'
+        '<h2 id="a1-steps">针对A1, A1 mini 打印机</h2>'
+        "<p>A1 热床电阻测量方法。</p>"
+        '<h2 id="x1-steps">针对X1, P1系列打印机</h2>'
+        "<p>拆下后盖上的 10 颗螺丝，取下后盖。</p>"
+        '<h2 id="h2-steps">针对 H2 系列打印机</h2>'
+        "<p>参考 Wiki 更换 H2系列 AC 板。</p>"
+        "</div></template>"
+    )
+
+    def test_foreign_model_sections_are_dropped(self):
+        parsed = parse_document(self.HTML, REF)
+        text = "\n".join(chunk.text for chunk in parsed.chunks)
+
+        self.assertIn("A1 热床电阻测量方法", text)
+        self.assertNotIn("10 颗螺丝", text)
+        self.assertNotIn("H2系列", text)
+
+
 if __name__ == "__main__":
     unittest.main()

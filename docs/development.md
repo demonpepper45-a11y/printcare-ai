@@ -71,6 +71,21 @@ python evals/run_retrieval_baseline.py --db runtime/printcare.sqlite3 --k 5
 
 该基线只检查“预期依据是否被召回、是否串用机型”，不评价答案忠实度与引用正确性；后者属于 T07，需要真实模型后逐题人工核验。
 
+## 问答（T07）
+
+```powershell
+$env:PYTHONPATH='src'
+# Key 写入 runtime/model_key.txt（已忽略），或设置 PRINTCARE_MODEL_API_KEY
+python -m printcare.assistant --db runtime/printcare.sqlite3 --machine a1_mini --question "挤出机堵料怎么清理？"
+python -m printcare.assistant --db runtime/printcare.sqlite3 --machine a1 --question "..." --json
+```
+
+- 模型默认 `deepseek-flash`，可用 `PRINTCARE_MODEL_NAME` / `--model` 切换；`--thinking` 开启思考模式。
+- 回答状态、引用与拒答规则见 [接口契约](interfaces.md)；引用会被校验为对应片段的逐字子串且不超过 200 字。
+- 同一页面的片段最多取 3 个（避免长页面挤占上下文）；可用 `--k` 调整召回数。
+- 多轮会话：`--session runtime/session.json` 会在文件里保存机型、现象与历史轮次。
+- 真实模型评估见 [回答评估记录](../evals/assistant-baseline.md)；自动检查不等于人工核验，不得据此宣称回答准确。
+
 ## 配置
 
 配置全部来自 `PRINTCARE_` 前缀的进程环境变量，变量清单见 [.env.example](../.env.example)。真实值放在本机 `.env` 或部署环境的秘密配置中，由启动方式注入；当前版本没有入口服务，也不会自动加载 `.env`。`.env`、运行数据库和索引目录已被忽略，不得提交。

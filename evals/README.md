@@ -49,8 +49,19 @@ python evals/run_retrieval_baseline.py --db runtime/printcare.sqlite3 --k 5
 - `FAIL`：未召回预期依据、出现跨机型依据，或告警缺失。
 - `SKIP`：`multi_turn` 与 `insufficient_evidence` 需要 T07 的回答与会话能力；预期依据尚未入库时也会跳过并说明。
 
+## 运行回答评估（T07）
+
+```powershell
+$env:PYTHONPATH='src'   # 并把 DeepSeek Key 放入 runtime/model_key.txt
+python evals/run_assistant_eval.py --db runtime/printcare.sqlite3 --k 8
+```
+
+自动判定：回答状态是否与预期一致、`answered` 是否引用预期文档、是否出现禁止机型文档、
+`refused` 的原因是否符合预期。结果写入 `runtime/assistant-eval.json`，并输出 token 与成本估算。
+最近一次真实模型结果见 [回答评估记录](assistant-baseline.md)。
+
 ## 重要限制
 
-- 这是**检索级基线**，不评价答案是否忠实、引用是否支持结论；不能据此宣称回答质量达标。
-- 预期依据来自官方页面路径，人工核验需在 T07 阶段逐题对照原文完成。
+- 这是**检索级与状态级**基线，不评价答案是否忠实、引用是否支持结论；不能据此宣称回答质量达标。
+- 预期依据来自官方页面路径，人工核验需按本文逐题对照原文完成。
 - 题目扩充到 50 道时，优先补充：更多 HMS 错误码、两台机型的同名维护主题、资料不足的近义问题、需要追问的模糊描述。

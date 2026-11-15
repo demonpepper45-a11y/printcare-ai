@@ -7,6 +7,7 @@ never stores image binaries.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from html.parser import HTMLParser
 from urllib.parse import unquote, urljoin
@@ -34,6 +35,10 @@ WIKI_HOST = "https://wiki.bambulab.com"
 MAX_CHUNK_CHARS = 800
 # Wiki.js sometimes renders unresolved template fields as a literal "None".
 JUNK_PARAGRAPH_TEXTS = {"none", "null"}
+# Some A1 pages embed maintenance sections for other models (e.g. "针对X1, P1系列打印机").
+FOREIGN_MODEL_RE = re.compile(
+    r"(?i)(?<![a-z0-9])(x1c|x1e|x1|p1p|p1s|p2s|h2d|h2s|h2|a2l|x2d)(?![a-z0-9])"
+)
 HEADING_TAGS = {"h1": 1, "h2": 2, "h3": 3, "h4": 4}
 VOID_TAGS = {
     "area",
@@ -146,6 +151,11 @@ def build_chunks(doc_id: str, blocks: list[Span]) -> list[Chunk]:
 
     def flush() -> None:
         nonlocal texts, images
+        if any(FOREIGN_MODEL_RE.search(heading.text) for heading in heading_stack):
+            # Content under another model's section must never be indexed for this page.
+            texts = []
+            images = []
+            return
         text = "\n".join(part for part in texts if part).strip()
         if text:
             chunk_id = compute_chunk_id(doc_id, text)
