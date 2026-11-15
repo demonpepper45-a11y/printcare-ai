@@ -47,6 +47,19 @@ python -m printcare.ingestion --paths-file runtime\first-batch.txt
 - 同一内容重复导入只更新采集时间；内容变化会替换该文档全部片段，`chunk_id` 随正文变化，旧引用因此失效。
 - 机型取自官方路径（`a1/` 或 `a1-mini/`），章节取自路径第二段；标题中的 “A1 Series” 不能作为机型依据。
 
+## 检索（T06）
+
+```powershell
+$env:PYTHONPATH='src'
+python -m printcare.retrieval --db runtime/printcare.sqlite3 --machine a1_mini --query "挤出机堵料"
+python -m printcare.retrieval --db runtime/printcare.sqlite3 --machine a1 --query "HMS_0300-0100-0001-0008" --json
+```
+
+- 机型是硬过滤：只检索元数据 `machines` 包含该机型的片段；只有明确标注两款通用的文档才会同时命中。
+- 问题中提到另一机型时返回 `warning=machine_mismatch` 且无结果；提到 X1 / P1S 等不支持机型时返回 `warning=unsupported_machine_mentioned`，不会把 A1 资料当成通用答案。
+- 中文按字二元组切分，英文按词切分，HMS 错误码统一为 `0300_1800_0001_0001` 形式并额外加权。
+- 当前只有 BM25 关键词检索。向量检索需要选定 Embedding 供应商与凭据，尚未实现（见 [架构](architecture.md)）。
+
 ## 配置
 
 配置全部来自 `PRINTCARE_` 前缀的进程环境变量，变量清单见 [.env.example](../.env.example)。真实值放在本机 `.env` 或部署环境的秘密配置中，由启动方式注入；当前版本没有入口服务，也不会自动加载 `.env`。`.env`、运行数据库和索引目录已被忽略，不得提交。
