@@ -28,6 +28,25 @@ ruff format --check .
 
 `pip install` 需要网络；不可用时仍可用 `python -m unittest` 运行测试，它通过 `tests/__init__.py` 直接使用 `src/` 下的代码。
 
+## 采集与解析（T04）
+
+```powershell
+$env:PYTHONPATH='src'                              # 未执行 pip install -e . 时使用
+python -m printcare.ingestion --list --limit 10     # 只列官方清单，不抓正文
+python -m printcare.ingestion --limit 3 --dry-run   # 抓取并解析，不写数据库
+python -m printcare.ingestion --limit 3             # 写入 runtime/printcare.sqlite3
+python -m printcare.ingestion --section maintenance --limit 10
+python -m printcare.ingestion --paths-file runtime\first-batch.txt
+```
+
+约定：
+
+- 只采集官方 A1 / A1 mini 的 `en`、`zh` 页面；正文与图片二进制不入库、不入 Git，只写入被忽略的 `runtime/` 目录与运行时数据库。
+- `--deactivate-missing` 只应在完整清单运行时使用；带 `--limit`、`--section`、`--paths-file` 等过滤时使用会误停用未抓取的文档。
+- 每次运行写入 `ingest_runs` 汇总，失败写入 `ingest_failures`（来源、阶段、异常类型、截断后的消息）；CLI 打印前 20 条，`--strict` 在有失败时返回非零。
+- 同一内容重复导入只更新采集时间；内容变化会替换该文档全部片段，`chunk_id` 随正文变化，旧引用因此失效。
+- 机型取自官方路径（`a1/` 或 `a1-mini/`），章节取自路径第二段；标题中的 “A1 Series” 不能作为机型依据。
+
 ## 配置
 
 配置全部来自 `PRINTCARE_` 前缀的进程环境变量，变量清单见 [.env.example](../.env.example)。真实值放在本机 `.env` 或部署环境的秘密配置中，由启动方式注入；当前版本没有入口服务，也不会自动加载 `.env`。`.env`、运行数据库和索引目录已被忽略，不得提交。
