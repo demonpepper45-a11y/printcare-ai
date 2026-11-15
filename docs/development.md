@@ -60,6 +60,17 @@ python -m printcare.retrieval --db runtime/printcare.sqlite3 --machine a1 --quer
 - 中文按字二元组切分，英文按词切分，HMS 错误码统一为 `0300_1800_0001_0001` 形式并额外加权。
 - 当前只有 BM25 关键词检索。向量检索需要选定 Embedding 供应商与凭据，尚未实现（见 [架构](architecture.md)）。
 
+## 评估（T05）
+
+首批 32 道人工核验题与判定方式见 [evals/README.md](../evals/README.md)。检索级基线：
+
+```powershell
+$env:PYTHONPATH='src'
+python evals/run_retrieval_baseline.py --db runtime/printcare.sqlite3 --k 5
+```
+
+该基线只检查“预期依据是否被召回、是否串用机型”，不评价答案忠实度与引用正确性；后者属于 T07，需要真实模型后逐题人工核验。
+
 ## 配置
 
 配置全部来自 `PRINTCARE_` 前缀的进程环境变量，变量清单见 [.env.example](../.env.example)。真实值放在本机 `.env` 或部署环境的秘密配置中，由启动方式注入；当前版本没有入口服务，也不会自动加载 `.env`。`.env`、运行数据库和索引目录已被忽略，不得提交。

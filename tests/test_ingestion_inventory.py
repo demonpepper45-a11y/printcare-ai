@@ -100,7 +100,23 @@ class FetchInventoryTest(unittest.TestCase):
             return b"<html>not json</html>"
 
         with self.assertRaises(InventoryError):
-            fetch_inventory(fake_post)
+            fetch_inventory(fake_post, retry_delay=0)
+
+    def test_truncated_response_is_retried(self):
+        payload = {"data": {"pages": {"list": PAGES}}}
+        full = json.dumps(payload).encode("utf-8")
+        calls = {"count": 0}
+
+        def flaky_post(_url, _payload, _timeout):
+            calls["count"] += 1
+            if calls["count"] == 1:
+                return full[: len(full) // 2]
+            return full
+
+        pages = fetch_inventory(flaky_post, retry_delay=0)
+
+        self.assertEqual(calls["count"], 2)
+        self.assertEqual(len(pages), len(PAGES))
 
     def test_missing_list_raises(self):
         def fake_post(_url, _payload, _timeout):

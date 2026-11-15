@@ -8,6 +8,7 @@ title, locale and update time, while page bodies require authorisation
 from __future__ import annotations
 
 import json
+import time
 import urllib.request
 from collections.abc import Callable
 from typing import Any
@@ -43,19 +44,33 @@ def _default_post_json(url: str, payload: dict[str, Any], timeout: int) -> bytes
 def fetch_inventory(
     post_json: PostJson | None = None,
     timeout: int = 90,
+    attempts: int = 3,
+    retry_delay: float = 1.0,
 ) -> list[dict[str, Any]]:
-    """Return the raw page list from the official GraphQL endpoint."""
+    """Return the raw page list from the official GraphQL endpoint.
+
+    The inventory is a ~15 MB JSON document; a dropped connection can return a
+    truncated body, so decoding/parsing failures are retried a few times.
+    """
     sender = post_json or _default_post_json
     payload = {"query": INVENTORY_QUERY}
-    try:
-        raw = sender(GRAPHQL_ENDPOINT, payload, timeout)
-    except Exception as exc:  # noqa: BLE001 - wrapped for a diagnosable message
-        raise InventoryError(f"inventory request failed: {type(exc).__name__}") from exc
+    last_error: Exception | None = None
+    data: Any = None
+    for attempt in range(attempts):
+        try:
+            raw = sender(GRAPHQL_ENDPOINT, payload, timeout)
+            text = raw.decode("utf-8") if isinstance(raw, bytes) else raw
+            data = json.loads(text)
+            break
+        except (InventoryError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+            last_error = exc
+            if attempt < attempts - 1 and retry_delay:
+                time.sleep(retry_delay)
 
-    try:
-        data = json.loads(raw)
-    except json.JSONDecodeError as exc:
-        raise InventoryError("inventory response is not valid JSON") from exc
+    if data is None:
+        raise InventoryError(
+            f"inventory request failed after {attempts} attempts: {type(last_error).__name__}"
+        )
 
     errors = data.get("errors")
     if errors:
