@@ -1,3 +1,4 @@
+import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
@@ -123,6 +124,26 @@ class IngestStoreTest(unittest.TestCase):
             self.assertEqual(reopened.count_documents(), 1)
         finally:
             reopened.close()
+
+    def test_failed_chunk_insert_rolls_back_document(self):
+        duplicated = (self.parsed.chunks[0], self.parsed.chunks[0])
+
+        with self.assertRaises(sqlite3.IntegrityError):
+            self.store.upsert_document(build_record(self.parsed), duplicated)
+
+        self.assertEqual(self.store.count_documents(), 0)
+        self.assertEqual(self.store.count_chunks(), 0)
+
+    def test_missing_chunks_are_rebuilt_on_reingest(self):
+        record = build_record(self.parsed)
+        self.store.upsert_document(record, self.parsed.chunks)
+        self.store.connection.execute("DELETE FROM chunks WHERE doc_id = ?", (record.doc_id,))
+        self.store.connection.commit()
+
+        outcome = self.store.upsert_document(record, self.parsed.chunks)
+
+        self.assertEqual(outcome, "updated")
+        self.assertEqual(self.store.count_chunks(), len(self.parsed.chunks))
 
 
 if __name__ == "__main__":

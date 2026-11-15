@@ -93,18 +93,38 @@ class IngestStore:
         self.close()
 
     def upsert_document(self, record: DocumentRecord, chunks: tuple[Chunk, ...]) -> str:
-        """Insert or refresh one document; return ``inserted``/``updated``/``unchanged``."""
+        """Insert or refresh one document; return ``inserted``/``updated``/``unchanged``.
+
+        The write runs in a single transaction: a failure while inserting chunks
+        rolls back the document row instead of leaving a half-written record.
+        """
         existing = self.connection.execute(
-            "SELECT content_hash, enabled FROM documents WHERE locale = ? AND canonical_path = ?",
+            "SELECT content_hash FROM documents WHERE locale = ? AND canonical_path = ?",
             (record.locale, record.canonical_path),
         ).fetchone()
 
-        if existing is None:
-            self._insert_document(record, chunks)
-            self.connection.commit()
-            return "inserted"
+        with self.connection:
+            if existing is None:
+                self._insert_document(record, chunks)
+                return "inserted"
 
-        if existing["content_hash"] == record.content_hash:
+            stored_chunks = self.connection.execute(
+                "SELECT COUNT(*) FROM chunks WHERE doc_id = ?", (record.doc_id,)
+            ).fetchone()[0]
+            if existing["content_hash"] == record.content_hash and stored_chunks == len(chunks):
+                self._update_metadata(record)
+                return "unchanged"
+
+            self.connection.execute("DELETE FROM chunks WHERE doc_id = ?", (record.doc_id,))
+            if existing["content_hash"] == record.content_hash:
+                self._update_metadata(record)
+            else:
+                self._update_metadata(record, content_hash=record.content_hash)
+            self._insert_chunks(record, chunks)
+            return "updated"
+
+    def _update_metadata(self, record: DocumentRecord, content_hash: str | None = None) -> None:
+        if content_hash is None:
             self.connection.execute(
                 """
                 UPDATE documents
@@ -121,10 +141,7 @@ class IngestStore:
                     record.doc_id,
                 ),
             )
-            self.connection.commit()
-            return "unchanged"
-
-        self.connection.execute("DELETE FROM chunks WHERE doc_id = ?", (record.doc_id,))
+            return
         self.connection.execute(
             """
             UPDATE documents
@@ -138,13 +155,10 @@ class IngestStore:
                 record.official_updated_at,
                 record.retrieved_at,
                 record.ingested_at,
-                record.content_hash,
+                content_hash,
                 record.doc_id,
             ),
         )
-        self._insert_chunks(record, chunks)
-        self.connection.commit()
-        return "updated"
 
     def _insert_document(self, record: DocumentRecord, chunks: tuple[Chunk, ...]) -> None:
         self.connection.execute(
@@ -207,42 +221,42 @@ class IngestStore:
             row["doc_id"] for row in rows if (row["locale"], row["canonical_path"]) not in keep_keys
         ]
         if stale:
-            self.connection.executemany(
-                "UPDATE documents SET enabled = 0 WHERE doc_id = ?",
-                [(doc_id,) for doc_id in stale],
-            )
-            self.connection.commit()
+            with self.connection:
+                self.connection.executemany(
+                    "UPDATE documents SET enabled = 0 WHERE doc_id = ?",
+                    [(doc_id,) for doc_id in stale],
+                )
         return len(stale)
 
     def record_run(self, run_id: str, report: IngestReport) -> None:
-        self.connection.execute(
-            "INSERT INTO ingest_runs (run_id, started_at, finished_at, report_json) "
-            "VALUES (?, ?, ?, ?)",
-            (
-                run_id,
-                report.started_at,
-                report.finished_at,
-                json.dumps(
-                    {
-                        "inserted": report.inserted,
-                        "updated": report.updated,
-                        "unchanged": report.unchanged,
-                        "parsed": report.parsed,
-                        "failed": report.failed,
-                        "disabled": report.disabled,
-                    }
+        with self.connection:
+            self.connection.execute(
+                "INSERT INTO ingest_runs (run_id, started_at, finished_at, report_json) "
+                "VALUES (?, ?, ?, ?)",
+                (
+                    run_id,
+                    report.started_at,
+                    report.finished_at,
+                    json.dumps(
+                        {
+                            "inserted": report.inserted,
+                            "updated": report.updated,
+                            "unchanged": report.unchanged,
+                            "parsed": report.parsed,
+                            "failed": report.failed,
+                            "disabled": report.disabled,
+                        }
+                    ),
                 ),
-            ),
-        )
-        self.connection.executemany(
-            "INSERT INTO ingest_failures (run_id, source_url, stage, error_type, message) "
-            "VALUES (?, ?, ?, ?, ?)",
-            [
-                (run_id, failure.source_url, failure.stage, failure.error_type, failure.message)
-                for failure in report.failures
-            ],
-        )
-        self.connection.commit()
+            )
+            self.connection.executemany(
+                "INSERT INTO ingest_failures (run_id, source_url, stage, error_type, message) "
+                "VALUES (?, ?, ?, ?, ?)",
+                [
+                    (run_id, failure.source_url, failure.stage, failure.error_type, failure.message)
+                    for failure in report.failures
+                ],
+            )
 
     def get_document(self, doc_id: str) -> dict | None:
         row = self.connection.execute(

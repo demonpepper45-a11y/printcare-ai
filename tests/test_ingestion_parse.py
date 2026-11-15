@@ -99,5 +99,31 @@ class BlockTypeTest(unittest.TestCase):
         self.assertEqual(tables[0].rows[0], ("Part", "Torque"))
 
 
+class TemplateNoiseTest(unittest.TestCase):
+    """Regression tests from a real page that rendered two literal "None" paragraphs."""
+
+    HTML = (
+        '<template slot="contents"><div>'
+        '<h2 id="module-list">Module List</h2>'
+        "<p>None</p>"
+        "<p>Same paragraph.</p>"
+        '<h2 id="verify">Verify</h2>'
+        "<p>Same paragraph.</p>"
+        "</div></template>"
+    )
+
+    def test_junk_paragraph_is_dropped(self):
+        parsed = parse_document(self.HTML, REF)
+
+        self.assertNotIn("None", [chunk.text for chunk in parsed.chunks])
+
+    def test_identical_chunks_are_deduplicated(self):
+        parsed = parse_document(self.HTML, REF)
+
+        chunk_ids = [chunk.chunk_id for chunk in parsed.chunks]
+        self.assertEqual(len(chunk_ids), len(set(chunk_ids)))
+        self.assertEqual([chunk.text for chunk in parsed.chunks], ["Same paragraph."])
+
+
 if __name__ == "__main__":
     unittest.main()

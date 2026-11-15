@@ -32,6 +32,8 @@ from printcare.ingestion.models import (
 
 WIKI_HOST = "https://wiki.bambulab.com"
 MAX_CHUNK_CHARS = 800
+# Wiki.js sometimes renders unresolved template fields as a literal "None".
+JUNK_PARAGRAPH_TEXTS = {"none", "null"}
 HEADING_TAGS = {"h1": 1, "h2": 2, "h3": 3, "h4": 4}
 VOID_TAGS = {
     "area",
@@ -136,6 +138,7 @@ def extract_blocks(node: _Node) -> list[Span]:
 
 def build_chunks(doc_id: str, blocks: list[Span]) -> list[Chunk]:
     chunks: list[Chunk] = []
+    seen_ids: set[str] = set()
     heading_stack: list[Heading] = []
     texts: list[str] = []
     images: list[ImageRef] = []
@@ -145,16 +148,19 @@ def build_chunks(doc_id: str, blocks: list[Span]) -> list[Chunk]:
         nonlocal texts, images
         text = "\n".join(part for part in texts if part).strip()
         if text:
-            chunks.append(
-                Chunk(
-                    chunk_id=compute_chunk_id(doc_id, text),
-                    ordinal=len(chunks),
-                    heading_path=tuple(item.text for item in heading_stack),
-                    anchor=anchor,
-                    text=text,
-                    images=_dedupe_images(images),
+            chunk_id = compute_chunk_id(doc_id, text)
+            if chunk_id not in seen_ids:
+                seen_ids.add(chunk_id)
+                chunks.append(
+                    Chunk(
+                        chunk_id=chunk_id,
+                        ordinal=len(chunks),
+                        heading_path=tuple(item.text for item in heading_stack),
+                        anchor=anchor,
+                        text=text,
+                        images=_dedupe_images(images),
+                    )
                 )
-            )
         texts = []
         images = []
 
@@ -244,6 +250,8 @@ def _walk(node: _Node, spans: list[Span]) -> None:
 def _paragraph(node: _Node) -> Paragraph | None:
     text = normalize_whitespace(_text(node))
     images = _collect_images(node)
+    if text.lower() in JUNK_PARAGRAPH_TEXTS and not images:
+        return None
     if not text and not images:
         return None
     return Paragraph(text=text, images=tuple(images))
