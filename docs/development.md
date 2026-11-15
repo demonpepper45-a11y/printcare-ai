@@ -2,7 +2,37 @@
 
 ## 当前阶段
 
-当前只有项目规划和协作模板，尚无可运行应用。Python 安装、依赖和运行命令由 T02 确定，不需要现在购买云服务器。
+已有 Python 工程骨架、环境配置读取和自动检查（T02），尚无资料采集、检索、问答和页面，没有可启动的服务。现在不需要购买云服务器。
+
+## 环境要求
+
+- Python 3.11 及以上；开发机锁定 3.12（`.python-version`，CI 在 3.11 和 3.12 上验证）。
+- 依赖使用精确版本：开发工具定义在 `pyproject.toml` 的 `dev` 附加项。当前没有运行时依赖；后续任务新增依赖时在同一处锁定版本，并说明新增原因。
+- 测试同时支持 `pytest` 和标准库 `unittest`。`unittest` 入口只依赖标准库，可在无网络环境运行。
+
+## 初始化与检查
+
+在仓库根目录执行；保存文件、提交和推送仍是独立步骤。
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
+python -m pip install -e ".[dev]"
+
+python -m unittest discover -s tests -t .   # 无需 pytest，可离线运行
+pytest                                      # CI 使用的入口
+ruff check .
+ruff format --check .
+```
+
+`pip install` 需要网络；不可用时仍可用 `python -m unittest` 运行测试，它通过 `tests/__init__.py` 直接使用 `src/` 下的代码。
+
+## 配置
+
+配置全部来自 `PRINTCARE_` 前缀的进程环境变量，变量清单见 [.env.example](../.env.example)。真实值放在本机 `.env` 或部署环境的秘密配置中，由启动方式注入；当前版本没有入口服务，也不会自动加载 `.env`。`.env`、运行数据库和索引目录已被忽略，不得提交。
+
+`Settings.describe()` 只输出是否配置了密钥，不回显密钥值。
 
 ## Git 基本操作
 
