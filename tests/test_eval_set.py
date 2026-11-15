@@ -8,6 +8,7 @@ from printcare.retrieval.tokenize import detect_machines, detect_unsupported_mod
 QUESTIONS_PATH = Path(__file__).resolve().parents[1] / "evals" / "questions.jsonl"
 VALID_MACHINES = {"a1", "a1_mini"}
 VALID_STATUSES = {"answered", "needs_clarification", "insufficient_evidence", "refused"}
+VALID_REFUSALS = {"no_reliable_source", "out_of_scope", "unsafe_procedure", "unsupported_machine"}
 VALID_CATEGORIES = {
     "direct_qa",
     "error_code",
@@ -112,6 +113,16 @@ class EvaluationSetTest(unittest.TestCase):
                 continue
             with self.subTest(question=item["id"]):
                 self.assertTrue(HMS_PATTERN.search(item["question"]))
+
+    def test_refused_questions_carry_a_valid_reason(self):
+        for item in self.questions:
+            if item["expected_status"] != "refused":
+                continue
+            reason = item.get("expected_refusal_reason")
+            if reason is None:
+                continue
+            with self.subTest(question=item["id"]):
+                self.assertIn(reason, VALID_REFUSALS)
 
     def test_multi_turn_questions_have_notes(self):
         for item in self.questions:
