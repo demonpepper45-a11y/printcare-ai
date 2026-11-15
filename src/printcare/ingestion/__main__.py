@@ -49,7 +49,8 @@ def build_parser() -> argparse.ArgumentParser:
 
 def _read_paths(path: Path) -> set[str]:
     entries: set[str] = set()
-    for line in path.read_text(encoding="utf-8").splitlines():
+    # utf-8-sig tolerates the BOM that Windows editors add to the first line.
+    for line in path.read_text(encoding="utf-8-sig").splitlines():
         stripped = line.strip()
         if not stripped or stripped.startswith("#"):
             continue
