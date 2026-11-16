@@ -72,3 +72,7 @@ python evals/run_assistant_eval.py --db runtime/printcare.sqlite3 --k 8
 - 这是**检索级与状态级**基线，不评价答案是否忠实、引用是否支持结论；不能据此宣称回答质量达标。
 - 预期依据来自官方页面路径，人工核验需按本文逐题对照原文完成。
 - 题目扩充到 50 道时，优先补充：更多 HMS 错误码、两台机型的同名维护主题、资料不足的近义问题、需要追问的模糊描述。
+
+## 安全限制后的评估
+
+最新记录见[应用层整改验收](safety-acceptance-2026-11-16.md)。JSON输出含`answer_mode`（guide_only/other）和summary.guide_only。指南索引可满足状态/文档自动检查，但不能据此判定已经回答完整维修步骤，必须单独报告数量并由专业人员复核。
