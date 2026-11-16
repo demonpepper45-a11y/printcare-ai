@@ -82,7 +82,7 @@ python -m printcare.assistant --db runtime/printcare.sqlite3 --machine a1 --ques
 ```
 
 - 模型默认 `deepseek-flash`，可用 `PRINTCARE_MODEL_NAME` / `--model` 切换；`--thinking` 开启思考模式。
-- 回答状态、引用与拒答规则见 [接口契约](interfaces.md)；引用会被校验为对应片段的逐字子串且不超过 200 字。
+- 回答状态、引用与拒答规则见 [接口契约](interfaces.md)；引用会被校验为模型可见的官方标题或正文的连续子串（归一化空白）且不超过 200 字；正文引用标记必须有对应的有效摘录。默认生成额度为 2,400 tokens，以减少综合回答 JSON 截断。
 - 同一页面的片段最多取 3 个（避免长页面挤占上下文）；可用 `--k` 调整召回数。
 - “那、刚才、已经”等追问可结合当前会话现象重新检索；显式机型冲突仍先拦截。更正机型时清空旧现象、步骤和历史，避免混用设备上下文；需要的现象和步骤可重新填写。
 - 多轮会话：`--session runtime/session.json` 会在文件里保存机型、现象与历史轮次。

@@ -173,7 +173,12 @@ class Assistant:
         follow_up = _optional_text(payload.get("follow_up_question"))
         refusal = _normalize_refusal(payload.get("refusal_reason"))
 
-        if status == "answered" and not citations:
+        valid_chunks = {citation.chunk_id for citation in citations}
+        valid_markers = {
+            f"[{source.label}]" for source in sources if source.hit.chunk_id in valid_chunks
+        }
+        markers = set(CITATION_MARKER_RE.findall(answer))
+        if status == "answered" and (not citations or not markers <= valid_markers):
             status = "insufficient_evidence"
             answer = BAD_CITATIONS_ANSWER
             missing = missing or ("other",)

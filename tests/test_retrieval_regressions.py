@@ -2,6 +2,7 @@
 
 import tempfile
 import unittest
+from dataclasses import replace
 from pathlib import Path
 
 from printcare.ingestion.store import IngestStore
@@ -48,3 +49,25 @@ class RetrievalRegressionTest(unittest.TestCase):
         )
         self.assertEqual(hits[0].doc_id, target)
         self.assertTrue(all(hit.machines == ("a1_mini",) for hit in hits))
+
+    def test_model_name_alone_does_not_match_unrelated_manual(self):
+        self.add("a1-mini/manual", "A1 mini 用户手册", ("欢迎使用设备。",), "a1_mini")
+        result = Retriever.from_sqlite(str(self.path)).query("A1 mini zzzz", "a1_mini")
+        self.assertEqual(result.hits, ())
+
+    def test_how_to_query_retrieves_solution_instead_of_only_definition(self):
+        self.add(
+            "first-layer",
+            "首层打印问题",
+            ("首层太薄的定义。", "首层太薄：运行打印校准。"),
+            "a1_mini",
+        )
+        retriever = Retriever.from_sqlite(str(self.path))
+        chunks = [
+            replace(chunk, heading_path=("解决方案", "步骤1"))
+            if "校准" in chunk.text
+            else replace(chunk, heading_path=("问题定义",))
+            for chunk in retriever.chunks
+        ]
+        hits = Retriever(chunks).query("A1 mini 第一层太薄怎么办？", "a1_mini", 1).hits
+        self.assertIn("校准", hits[0].text)

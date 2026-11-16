@@ -59,11 +59,11 @@ python evals/run_assistant_eval.py --db runtime/printcare.sqlite3 --k 8
 
 自动判定：回答状态是否与预期一致、`answered` 是否引用预期文档、是否出现禁止机型文档、
 `refused` 的原因是否符合预期。结果写入 `runtime/assistant-eval.json`，并输出 token 与成本估算。
-最近一次真实模型结果见 [回答评估记录](assistant-baseline.md)。
+最近一次真实模型结果及逐题 AI 复核见 [2026-11-16 验收记录](acceptance-2026-11-16.md)；[早期回答基线](assistant-baseline.md)保留历史。
 
 多轮题现按 `context_turns` 在同一个真实 Session 中逐轮执行，再评估主问题。
 任一前置轮次失败则整题失败，缺少上下文配置也判失败，不能静默跳过。
-输出包含各前置轮次结果，token/cost 汇总包括前置轮次；默认 k=8，与应用保持一致。
+输出包含各前置轮次结果、引用 URL/章节/短句、追问与拒答原因，方便逐题复核；token/cost 汇总包括前置轮次；默认 k=8，与应用保持一致。
 每题独立建立会话，避免不同题之间泄漏上下文。运行真实评估会调用模型并产生费用。
 新增自动回归使用模拟模型，只验证流程、引用规则和会话行为，不能替代真实多轮质量评估。
 

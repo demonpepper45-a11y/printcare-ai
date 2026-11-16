@@ -131,6 +131,16 @@ def evaluate_question(
         "leaked_evidence": leaked,
         "answer": result.answer,
         "citation_quotes": [citation.quote for citation in result.citations],
+        "citation_sources": [
+            {
+                "url": citation.source_url,
+                "section": list(citation.section_path),
+                "quote": citation.quote,
+            }
+            for citation in result.citations
+        ],
+        "follow_up_question": result.follow_up_question,
+        "refusal_reason": result.refusal_reason,
         "usage": usage,
         "context_results": context_results,
     }

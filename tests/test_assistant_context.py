@@ -101,6 +101,22 @@ class ValidateCitationsTest(unittest.TestCase):
         self.assertTrue(citations[0].quote_truncated)
         self.assertEqual(len(citations[0].quote), 200)
 
+    def test_accepts_visible_official_title_as_quote(self):
+        hit = make_hit(title="HMS code: motor stuck", text="Equivalent codes: 123")
+        citations, dropped = validate_citations(
+            [{"source": "S1", "quote": "motor stuck"}], build_sources((hit,)), machine="a1"
+        )
+        self.assertEqual(dropped, 0)
+        self.assertEqual(len(citations), 1)
+
+    def test_rejects_quote_outside_visible_context(self):
+        sources = build_sources((make_hit(text="x" * 1200 + "hidden repair procedure"),))
+        citations, dropped = validate_citations(
+            [{"source": "S1", "quote": "hidden repair procedure"}], sources, machine="a1"
+        )
+        self.assertEqual(citations, ())
+        self.assertEqual(dropped, 1)
+
     def test_deduplicates_same_chunk(self):
         citations, _ = validate_citations(
             [

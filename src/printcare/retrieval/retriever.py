@@ -76,13 +76,23 @@ class Retriever:
         if not chunks:
             return RetrievalResult(machine=machine, query=query, detected_machines=detected)
 
-        query_tokens = tokenize(query)
+        # Model selection is already enforced above. Model-name tokens should
+        # not make unrelated manuals/FAQs look relevant to a technical query.
+        query_tokens = tuple(token for token in tokenize(query) if token not in {"a1", "mini"})
         scores = [
             body + 2.0 * title
             for body, title in zip(
                 index.scores(query_tokens), titles.scores(query_tokens), strict=True
             )
         ]
+        if any(term in query for term in ("怎么", "如何", "步骤", "处理", "清理", "排查", "检查")):
+            title_scores = titles.scores(query_tokens)
+            for position, chunk in enumerate(chunks):
+                heading = " ".join(chunk.heading_path).lower()
+                if "解决方案" in heading or "solution" in heading:
+                    # When the title matches a how-to query, expose the actual
+                    # procedure rather than only the definition/applicability.
+                    scores[position] += 2.0 * title_scores[position]
         codes = {normalize_hms(code) for code in extract_hms_codes(query)}
         if codes:
             for position, chunk in enumerate(chunks):

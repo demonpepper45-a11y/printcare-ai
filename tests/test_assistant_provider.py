@@ -42,6 +42,7 @@ class DeepSeekProviderTest(unittest.TestCase):
         self.assertTrue(opener.request.get_header("Authorization").startswith("Bearer sk-"))
         body = json.loads(opener.request.data.decode("utf-8"))
         self.assertEqual(body["model"], "deepseek-flash")
+        self.assertEqual(body["max_tokens"], 2400)
         self.assertFalse(body["stream"])
         self.assertEqual(body["response_format"], {"type": "json_object"})
         self.assertEqual(body["thinking"], {"type": "disabled"})
