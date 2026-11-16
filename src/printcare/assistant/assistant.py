@@ -31,6 +31,14 @@ VALID_MISSING = {
 }
 VALID_REFUSALS = {"no_reliable_source", "out_of_scope", "unsafe_procedure", "unsupported_machine"}
 CITATION_MARKER_RE = re.compile(r"\[S\d+\]")
+UNCERTAIN_CONCLUSION_PHRASES = (
+    "无法判断",
+    "无法直接判断",
+    "无法确定",
+    "不能确定",
+    "无法给出结论",
+    "无法得出结论",
+)
 
 NO_HITS_ANSWER = "现有官方资料没有覆盖这个问题，无法给出有依据的结论。"
 BAD_CITATIONS_ANSWER = "检索到的官方资料不足以支持一个可核验的结论，因此不给出具体步骤。"
@@ -159,6 +167,11 @@ class Assistant:
             status = "insufficient_evidence"
             answer = BAD_CITATIONS_ANSWER
             missing = missing or ("other",)
+        elif status == "answered" and _states_uncertainty(answer):
+            # The model listed related facts but concluded it cannot judge:
+            # that is "insufficient evidence", not a supported answer.
+            status = "insufficient_evidence"
+            missing = missing or ("other",)
 
         return self._finish(
             session,
@@ -245,3 +258,7 @@ def _normalize_refusal(value: Any) -> str | None:
 def _optional_text(value: Any) -> str | None:
     text = str(value or "").strip()
     return text or None
+
+
+def _states_uncertainty(answer: str) -> bool:
+    return any(phrase in answer for phrase in UNCERTAIN_CONCLUSION_PHRASES)
