@@ -67,6 +67,13 @@ class SettingsTest(unittest.TestCase):
         self.assertEqual(settings.model_name, "deepseek-v4-pro")
         self.assertEqual(settings.model_api_key_file, Path("runtime/key.txt"))
 
+    def test_admin_token_from_env(self):
+        self.assertIsNone(Settings.from_env({}).admin_token)
+        self.assertEqual(
+            Settings.from_env({"PRINTCARE_ADMIN_TOKEN": "secret"}).admin_token,
+            "secret",
+        )
+
 
 class ResolveModelKeyTest(unittest.TestCase):
     def test_environment_key_wins(self):
