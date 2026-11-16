@@ -194,6 +194,18 @@ class AssistantTest(unittest.TestCase):
 
         self.assertEqual(result.status, "insufficient_evidence")
 
+    def test_uncertainty_with_qualified_phrase_also_downgrades(self):
+        provider = FakeProvider(
+            answered_payload(
+                answer="因此无法仅凭现有资料判断“超过 60 分贝”是否正常。",
+            )
+        )
+        assistant = Assistant(self.retriever, provider)
+
+        result = assistant.answer("热床不加热能判断是主板坏了吗？", "a1")
+
+        self.assertEqual(result.status, "insufficient_evidence")
+
     def test_normal_answer_keeps_answered_status(self):
         provider = FakeProvider(answered_payload())
         assistant = Assistant(self.retriever, provider)

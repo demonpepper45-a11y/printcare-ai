@@ -32,9 +32,7 @@ VALID_MISSING = {
 VALID_REFUSALS = {"no_reliable_source", "out_of_scope", "unsafe_procedure", "unsupported_machine"}
 CITATION_MARKER_RE = re.compile(r"\[S\d+\]")
 UNCERTAIN_CONCLUSION_RE = re.compile(
-    r"(无法|不能)"
-    r"(?:直接|据此|准确|明确|完全|仅凭)?"
-    r"(判断|确定|给出结论|得出结论)"
+    r"(无法|不能)[^。！？\n]{0,12}(判断|确定|判定|给出结论|得出结论)"
 )
 
 NO_HITS_ANSWER = "现有官方资料没有覆盖这个问题，无法给出有依据的结论。"
