@@ -34,7 +34,7 @@ class Retriever:
 
     def __init__(self, chunks: Sequence[ChunkRecord]) -> None:
         self.chunks = tuple(chunks)
-        self._indexes: dict[str, tuple[BM25Index, list[ChunkRecord]]] = {}
+        self._indexes: dict[str, tuple[BM25Index, BM25Index, list[ChunkRecord]]] = {}
 
     @classmethod
     def from_sqlite(cls, db_path: str) -> Retriever:
@@ -72,11 +72,17 @@ class Retriever:
         if not query:
             return RetrievalResult(machine=machine, query=query)
 
-        index, chunks = self._index_for(machine)
+        index, titles, chunks = self._index_for(machine)
         if not chunks:
             return RetrievalResult(machine=machine, query=query, detected_machines=detected)
 
-        scores = index.scores(tokenize(query))
+        query_tokens = tokenize(query)
+        scores = [
+            body + 2.0 * title
+            for body, title in zip(
+                index.scores(query_tokens), titles.scores(query_tokens), strict=True
+            )
+        ]
         codes = {normalize_hms(code) for code in extract_hms_codes(query)}
         if codes:
             for position, chunk in enumerate(chunks):
@@ -88,6 +94,19 @@ class Retriever:
             ((score, chunk) for score, chunk in zip(scores, chunks, strict=True) if score > 0),
             key=lambda pair: (-pair[0], pair[1].chunk_id),
         )
+        # Reserve room for other documents before allowing a long page to fill
+        # the result window. Backfill if the corpus has too few distinct pages.
+        counts: dict[str, int] = {}
+        diverse, deferred = [], []
+        for pair in ranked:
+            doc_id = pair[1].doc_id
+            if counts.get(doc_id, 0) < 2:
+                diverse.append(pair)
+                counts[doc_id] = counts.get(doc_id, 0) + 1
+            else:
+                deferred.append(pair)
+        selected = (diverse + deferred)[: max(0, limit)]
+        selected.sort(key=lambda pair: (-pair[0], pair[1].chunk_id))
         hits = tuple(
             RetrievalHit(
                 chunk_id=chunk.chunk_id,
@@ -102,7 +121,7 @@ class Retriever:
                 section=chunk.section,
                 official_updated_at=chunk.official_updated_at,
             )
-            for score, chunk in ranked[:limit]
+            for score, chunk in selected
         )
         return RetrievalResult(
             machine=machine,
@@ -111,11 +130,12 @@ class Retriever:
             detected_machines=detected,
         )
 
-    def _index_for(self, machine: str) -> tuple[BM25Index, list[ChunkRecord]]:
+    def _index_for(self, machine: str) -> tuple[BM25Index, BM25Index, list[ChunkRecord]]:
         cached = self._indexes.get(machine)
         if cached is not None:
             return cached
         chunks = [chunk for chunk in self.chunks if machine in chunk.machines]
         index = BM25Index([tokenize(f"{chunk.title} {chunk.text}") for chunk in chunks])
-        self._indexes[machine] = (index, chunks)
-        return index, chunks
+        titles = BM25Index([tokenize(chunk.title) for chunk in chunks])
+        self._indexes[machine] = (index, titles, chunks)
+        return index, titles, chunks

@@ -2,13 +2,13 @@
 
 ## 当前阶段
 
-已有 Python 工程骨架、环境配置读取和自动检查（T02），尚无资料采集、检索、问答和页面，没有可启动的服务。现在不需要购买云服务器。
+已具备本地资料采集、BM25 检索、模型问答、FastAPI 与 Streamlit 页面。云部署和向量检索尚未实现；质量评估与人工核验仍需继续。
 
 ## 环境要求
 
 - Python 3.11 及以上；开发机锁定 3.12（`.python-version`，CI 在 3.11 和 3.12 上验证）。
-- 依赖使用精确版本：开发工具定义在 `pyproject.toml` 的 `dev` 附加项。当前没有运行时依赖；后续任务新增依赖时在同一处锁定版本，并说明新增原因。
-- 测试同时支持 `pytest` 和标准库 `unittest`。`unittest` 入口只依赖标准库，可在无网络环境运行。
+- 依赖使用精确版本：开发工具定义在 `pyproject.toml` 的 `dev` 附加项。运行时依赖和开发依赖均见 pyproject.toml；页面额外使用 web 附加依赖。
+- 测试同时支持 `pytest` 和标准库 `unittest`。测试还需要项目依赖（API 测试使用 FastAPI/httpx）；安装完成后可用模拟模型离线验证。
 
 ## 初始化与检查
 
@@ -18,15 +18,15 @@
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install --upgrade pip
-python -m pip install -e ".[dev]"
+python -m pip install -e ".[dev,web]"
 
-python -m unittest discover -s tests -t .   # 无需 pytest，可离线运行
+python -m unittest discover -s tests -t .   # 已安装项目依赖后可运行
 pytest                                      # CI 使用的入口
 ruff check .
 ruff format --check .
 ```
 
-`pip install` 需要网络；不可用时仍可用 `python -m unittest` 运行测试，它通过 `tests/__init__.py` 直接使用 `src/` 下的代码。
+`pip install` 需要网络。测试通过 `tests/__init__.py` 使用 `src/` 下代码，但不替代第三方依赖安装。Windows 沙箱下 API 测试还需要允许本地回环连接。
 
 ## 采集与解析（T04）
 
@@ -41,7 +41,7 @@ python -m printcare.ingestion --paths-file runtime\first-batch.txt
 
 约定：
 
-- 只采集官方 A1 / A1 mini 的 `en`、`zh` 页面；正文与图片二进制不入库、不入 Git，只写入被忽略的 `runtime/` 目录与运行时数据库。
+- 只采集官方 A1 / A1 mini 的 `en`、`zh` 页面；正文片段写入被忽略的运行时 SQLite，原文及图片二进制不提交到 Git；图片二进制不由当前管道存储。运行时缓存和对外使用许可仍需确认。
 - `--deactivate-missing` 只应在完整清单运行时使用；带 `--limit`、`--section`、`--paths-file` 等过滤时使用会误停用未抓取的文档。
 - 每次运行写入 `ingest_runs` 汇总，失败写入 `ingest_failures`（来源、阶段、异常类型、截断后的消息）；CLI 打印前 20 条，`--strict` 在有失败时返回非零。
 - 同一内容重复导入只更新采集时间；内容变化会替换该文档全部片段，`chunk_id` 随正文变化，旧引用因此失效。
@@ -58,6 +58,7 @@ python -m printcare.retrieval --db runtime/printcare.sqlite3 --machine a1 --quer
 - 机型是硬过滤：只检索元数据 `machines` 包含该机型的片段；只有明确标注两款通用的文档才会同时命中。
 - 问题中提到另一机型时返回 `warning=machine_mismatch` 且无结果；提到 X1 / P1S 等不支持机型时返回 `warning=unsupported_machine_mentioned`，不会把 A1 资料当成通用答案。
 - 中文按字二元组切分，英文按词切分，HMS 错误码统一为 `0300_1800_0001_0001` 形式并额外加权。
+- 查询和正文统一归一化“皮带/同步带”“第一层/首层”，标题单独加权；优先每文档最多 2 个片段，不足时回填，保持最终分数排序。
 - 当前只有 BM25 关键词检索。向量检索需要选定 Embedding 供应商与凭据，尚未实现（见 [架构](architecture.md)）。
 
 ## 评估（T05）
@@ -83,6 +84,7 @@ python -m printcare.assistant --db runtime/printcare.sqlite3 --machine a1 --ques
 - 模型默认 `deepseek-flash`，可用 `PRINTCARE_MODEL_NAME` / `--model` 切换；`--thinking` 开启思考模式。
 - 回答状态、引用与拒答规则见 [接口契约](interfaces.md)；引用会被校验为对应片段的逐字子串且不超过 200 字。
 - 同一页面的片段最多取 3 个（避免长页面挤占上下文）；可用 `--k` 调整召回数。
+- “那、刚才、已经”等追问可结合当前会话现象重新检索；显式机型冲突仍先拦截。更正机型时清空旧现象、步骤和历史，避免混用设备上下文；需要的现象和步骤可重新填写。
 - 多轮会话：`--session runtime/session.json` 会在文件里保存机型、现象与历史轮次。
 - 真实模型评估见 [回答评估记录](../evals/assistant-baseline.md)；自动检查不等于人工核验，不得据此宣称回答准确。
 
@@ -102,7 +104,7 @@ streamlit run src/printcare/web/app.py                    # 另一个终端启�
 
 ## 配置
 
-配置全部来自 `PRINTCARE_` 前缀的进程环境变量，变量清单见 [.env.example](../.env.example)。真实值放在本机 `.env` 或部署环境的秘密配置中，由启动方式注入；当前版本没有入口服务，也不会自动加载 `.env`。`.env`、运行数据库和索引目录已被忽略，不得提交。
+配置全部来自 `PRINTCARE_` 前缀的进程环境变量，变量清单见 [.env.example](../.env.example)。真实值放在本机 `.env` 或部署环境的秘密配置中，由启动方式注入；当前 API/CLI 不会自动加载 `.env`，请由启动方式注入。`.env`、运行数据库和索引目录已被忽略，不得提交。
 
 `Settings.describe()` 只输出是否配置了密钥，不回显密钥值。
 

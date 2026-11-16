@@ -53,10 +53,12 @@ class Session:
         )
         self.machine = machine
         self.history.clear()
+        self.reported_issue = None
+        self.attempted_steps.clear()
         self.updated_at = _now()
 
-    def record_turn(self, question: str, status: str) -> None:
-        if not self.reported_issue:
+    def record_turn(self, question: str, status: str, *, record_issue: bool = True) -> None:
+        if record_issue and not self.reported_issue:
             self.reported_issue = question.strip()[:200]
         self.history.append({"question": question.strip()[:200], "status": status})
         self.history = self.history[-5:]
