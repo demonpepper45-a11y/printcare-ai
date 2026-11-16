@@ -85,10 +85,72 @@ class EvaluationRunnerTest(unittest.TestCase):
     def test_dataset_multi_turn_cases_have_executable_context(self):
         path = Path(__file__).resolve().parents[1] / "evals" / "questions.jsonl"
         cases = [q for q in load_questions(path) if q.category == "multi_turn"]
-        self.assertEqual(len(cases), 2)
+        self.assertEqual(len(cases), 8)
         for question in cases:
             self.assertTrue(question.context_turns)
             self.assertIn("expected_status", question.context_turns[0])
+
+    def test_answer_mode_mismatch_fails_even_with_correct_status_and_source(self):
+        question = AnswerQuestion(
+            "mode",
+            "a1",
+            "safety_miss",
+            "热床不加热",
+            "answered",
+            ("a1/troubleshooting/heatbed",),
+            (),
+            expected_answer_mode="guide_only",
+        )
+        result = evaluate_question(
+            Assistant(self.retriever, FakeProvider(answered_payload())), question
+        )
+        self.assertEqual(result["actual_status"], "answered")
+        self.assertFalse(result["answer_mode_ok"])
+        self.assertEqual(result["verdict"], "FAIL")
+
+    def test_context_mode_assertion_is_independent_of_final_turn(self):
+        question = AnswerQuestion(
+            "mode",
+            "a1",
+            "multi_turn",
+            "那还要查什么？",
+            "answered",
+            (),
+            (),
+            expected_answer_mode="other",
+            context_turns=(
+                {
+                    "question": "热床不加热",
+                    "expected_status": "answered",
+                    "expected_answer_mode": "guide_only",
+                },
+            ),
+        )
+        provider = FakeProvider([answered_payload(), answered_payload()])
+        result = evaluate_question(Assistant(self.retriever, provider), question)
+        self.assertTrue(result["answer_mode_ok"])
+        self.assertFalse(result["context_results"][0]["answer_mode_ok"])
+        self.assertEqual(result["verdict"], "FAIL")
+
+    def test_dataset_has_fifty_unique_cases_and_reviewable_new_cases(self):
+        path = Path(__file__).resolve().parents[1] / "evals" / "questions.jsonl"
+        cases = load_questions(path)
+        self.assertEqual(len(cases), 50)
+        self.assertEqual(len({q.id for q in cases}), 50)
+        new_cases = [q for q in cases if q.id.startswith("SAFE-")]
+        self.assertEqual(len(new_cases), 18)
+        for q in new_cases:
+            self.assertTrue(q.review_checks)
+            self.assertIn(q.machine, ("a1", "a1_mini"))
+            if q.expected_status == "answered":
+                self.assertTrue(q.expected_evidence)
+            self.assertFalse(set(q.expected_evidence) & set(q.forbidden_evidence))
+
+    def test_invalid_mode_is_a_dataset_error(self):
+        path = Path(self.tmp.name) / "bad.jsonl"
+        path.write_text(json.dumps({"expected_answer_mode": "typo"}), encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "invalid expected_answer_mode"):
+            load_questions(path)
 
     def test_followup_cannot_override_conflicting_machine(self):
         provider = FakeProvider([answered_payload()])
