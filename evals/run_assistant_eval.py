@@ -250,6 +250,10 @@ def evaluate_question(
             }
             for citation in result.citations
         ],
+        "citation_drops": [
+            {"source": drop.source, "reason": drop.reason, "attempt": drop.attempt}
+            for drop in getattr(result, "citation_audit", ())
+        ],
         "follow_up_question": result.follow_up_question,
         "refusal_reason": result.refusal_reason,
         "usage": usage,

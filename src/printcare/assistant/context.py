@@ -19,6 +19,16 @@ class ModelOutputError(RuntimeError):
 
 
 @dataclass(frozen=True)
+class CitationDrop:
+    """Why one model-provided citation was discarded."""
+
+    source: str
+    reason: str
+    quote_length: int = 0
+    attempt: int = 1
+
+
+@dataclass(frozen=True)
 class Source:
     label: str
     hit: RetrievalHit
@@ -98,23 +108,52 @@ def validate_citations(
     machine: str,
     max_quote: int = MAX_QUOTE_CHARS,
 ) -> tuple[tuple[Citation, ...], int]:
-    """Keep only citations that point to a provided source and quote it verbatim."""
+    """Compatibility wrapper around :func:`validate_citations_with_audit`."""
+    citations, drops = validate_citations_with_audit(
+        raw_citations, sources, machine=machine, max_quote=max_quote
+    )
+    return citations, len(drops)
+
+
+def validate_citations_with_audit(
+    raw_citations: Any,
+    sources: list[Source],
+    *,
+    machine: str,
+    max_quote: int = MAX_QUOTE_CHARS,
+    attempt: int = 1,
+) -> tuple[tuple[Citation, ...], tuple[CitationDrop, ...]]:
+    """Keep citations that point to a provided source and quote visible text.
+
+    Every discarded item is returned with a machine-readable reason so failures
+    can be diagnosed without logging answer or page text.
+    """
     by_label = {source.label: source for source in sources}
     citations: list[Citation] = []
+    drops: list[CitationDrop] = []
     seen: set[str] = set()
-    dropped = 0
     if not isinstance(raw_citations, list):
-        return (), 0
+        return (), ()
 
     for item in raw_citations:
         if not isinstance(item, dict):
-            dropped += 1
+            drops.append(CitationDrop(source="-", reason="invalid_item", attempt=attempt))
             continue
         label = str(item.get("source") or "")
         quote = str(item.get("quote") or "")
         source = by_label.get(label)
-        if source is None or not quote.strip():
-            dropped += 1
+        if source is None:
+            drops.append(
+                CitationDrop(
+                    source=label or "-",
+                    reason="unknown_source",
+                    quote_length=len(quote),
+                    attempt=attempt,
+                )
+            )
+            continue
+        if not quote.strip():
+            drops.append(CitationDrop(source=label, reason="empty_quote", attempt=attempt))
             continue
         hit = source.hit
         visible_fields = (hit.title, hit.text[:MAX_SOURCE_CHARS])
@@ -123,14 +162,22 @@ def validate_citations(
         if not normalized_quote or not any(
             normalized_quote in field for field in normalized_fields
         ):
-            dropped += 1
+            drops.append(
+                CitationDrop(
+                    source=label,
+                    reason="quote_not_found",
+                    quote_length=len(normalized_quote),
+                    attempt=attempt,
+                )
+            )
             continue
+        if hit.chunk_id in seen:
+            drops.append(CitationDrop(source=label, reason="duplicate_source", attempt=attempt))
+            continue
+        seen.add(hit.chunk_id)
         truncated = len(normalized_quote) > max_quote
         if truncated:
             normalized_quote = normalized_quote[:max_quote]
-        if hit.chunk_id in seen:
-            continue
-        seen.add(hit.chunk_id)
         citations.append(
             Citation(
                 chunk_id=hit.chunk_id,
@@ -145,4 +192,4 @@ def validate_citations(
                 quote_truncated=truncated,
             )
         )
-    return tuple(citations), dropped
+    return tuple(citations), tuple(drops)

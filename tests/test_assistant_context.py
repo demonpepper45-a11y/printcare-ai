@@ -6,6 +6,7 @@ from printcare.assistant.context import (
     parse_model_payload,
     select_sources,
     validate_citations,
+    validate_citations_with_audit,
 )
 from printcare.retrieval.models import RetrievalHit
 
@@ -128,6 +129,54 @@ class ValidateCitationsTest(unittest.TestCase):
         )
 
         self.assertEqual(len(citations), 1)
+
+
+class CitationAuditTest(unittest.TestCase):
+    def setUp(self):
+        self.sources = build_sources((make_hit(),))
+
+    def test_reports_unknown_source(self):
+        _, drops = validate_citations_with_audit(
+            [{"source": "S9", "quote": "先断电"}], self.sources, machine="a1"
+        )
+        self.assertEqual([drop.reason for drop in drops], ["unknown_source"])
+
+    def test_reports_empty_quote(self):
+        _, drops = validate_citations_with_audit(
+            [{"source": "S1", "quote": "  "}], self.sources, machine="a1"
+        )
+        self.assertEqual([drop.reason for drop in drops], ["empty_quote"])
+
+    def test_reports_quote_not_found(self):
+        _, drops = validate_citations_with_audit(
+            [{"source": "S1", "quote": "先拆机再接线"}], self.sources, machine="a1"
+        )
+        self.assertEqual([drop.reason for drop in drops], ["quote_not_found"])
+        self.assertEqual(drops[0].quote_length, len("先拆机再接线"))
+
+    def test_reports_duplicate_source(self):
+        _, drops = validate_citations_with_audit(
+            [
+                {"source": "S1", "quote": "先断电"},
+                {"source": "S1", "quote": "检查热床线缆"},
+            ],
+            self.sources,
+            machine="a1",
+        )
+        self.assertEqual([drop.reason for drop in drops], ["duplicate_source"])
+
+    def test_reports_invalid_item(self):
+        _, drops = validate_citations_with_audit(["S1"], self.sources, machine="a1")
+        self.assertEqual([drop.reason for drop in drops], ["invalid_item"])
+
+    def test_truncation_is_not_a_drop(self):
+        long_text = TEXT * 20
+        sources = build_sources((make_hit(text=long_text),))
+        citations, drops = validate_citations_with_audit(
+            [{"source": "S1", "quote": long_text}], sources, machine="a1"
+        )
+        self.assertEqual(drops, ())
+        self.assertTrue(citations[0].quote_truncated)
 
 
 if __name__ == "__main__":

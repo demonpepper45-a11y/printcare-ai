@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import re
 import uuid
 from dataclasses import dataclass, replace
@@ -9,10 +10,13 @@ from typing import Any
 
 from printcare.assistant.context import (
     Citation,
+    CitationDrop,
+    ModelOutputError,
     build_sources,
     parse_model_payload,
     select_sources,
     validate_citations,
+    validate_citations_with_audit,
 )
 from printcare.assistant.definitions import find_hms_definition
 from printcare.assistant.policy import (
@@ -21,10 +25,17 @@ from printcare.assistant.policy import (
     refuses_modification,
 )
 from printcare.assistant.prompts import build_messages
-from printcare.assistant.provider import ModelProvider
+from printcare.assistant.provider import ModelProvider, ProviderError
 from printcare.assistant.session import Session, SessionSummary
 from printcare.retrieval.retriever import Retriever
 from printcare.retrieval.tokenize import detect_machines, detect_unsupported_models
+
+LOGGER = logging.getLogger(__name__)
+REPAIR_PROMPT = (
+    "上一条回答的引用没有通过校验：引用短句必须是给定资料原文的逐字片段，"
+    "并且只能使用已提供的 [S#] 来源。请仅输出修正后的 JSON，不要解释修正过程，"
+    "不要改写原文，不要新增来源。"
+)
 
 VALID_STATUSES = {"answered", "needs_clarification", "insufficient_evidence", "refused"}
 VALID_MISSING = {
@@ -40,6 +51,20 @@ VALID_REFUSALS = {"no_reliable_source", "out_of_scope", "unsafe_procedure", "uns
 CITATION_MARKER_RE = re.compile(r"\[S\d+\]")
 UNCERTAIN_CONCLUSION_RE = re.compile(
     r"(无法|不能)[^。！？\n]{0,12}(判断|确定|判定|给出结论|得出结论)"
+)
+# A specific "what is missing" explanation is useful, but an insufficient answer
+# must not smuggle in uncited maintenance suggestions.
+GAP_EXPLANATION_RE = re.compile(
+    r"没有|未(?:提供|给出|覆盖)|缺少|无法(?:给出|判断)|不足以|找不到|"
+    r"资料不足|依据不足|信息不足|建议(?:查看|参考|咨询)"
+)
+GUIDE_POINTER_RE = re.compile(
+    r"官方指南|官方支持|官方资料|参考官方|完整指南|查看[^。！？\n]{0,12}指南|"
+    r"联系[^。！？\n]{0,8}支持"
+)
+INSUFFICIENT_PROCEDURE_RE = re.compile(
+    r"第[一二三四五六七八九十0-9]+步|步骤[：:]|首先|然后|接着|请先|"
+    r"先[^。！？\n]{0,10}(?:再|然后)|可以|可先|建议先|需要先"
 )
 
 NO_HITS_ANSWER = "现有官方资料没有覆盖这个问题，无法给出有依据的结论。"
@@ -73,6 +98,7 @@ class ChatResult:
     machine_check: MachineCheck
     session: SessionSummary
     usage: dict[str, int] | None = None
+    citation_audit: tuple[CitationDrop, ...] = ()
 
 
 class Assistant:
@@ -213,27 +239,31 @@ class Assistant:
         messages = build_messages(text, machine, sources, session.summary())
         raw = self.provider.complete(messages)
         payload = parse_model_payload(raw)
-        status = _normalize_status(payload.get("status"))
-        answer = str(payload.get("answer") or "").strip()
-        citations, _dropped = validate_citations(payload.get("citations"), sources, machine=machine)
-        missing = _normalize_missing(payload.get("missing_information"))
-        follow_up = _optional_text(payload.get("follow_up_question"))
-        refusal = _normalize_refusal(payload.get("refusal_reason"))
-
-        valid_chunks = {citation.chunk_id for citation in citations}
-        valid_markers = {
-            f"[{source.label}]" for source in sources if source.hit.chunk_id in valid_chunks
-        }
-        markers = set(CITATION_MARKER_RE.findall(answer))
-        if status == "answered" and (not citations or not markers <= valid_markers):
-            status = "insufficient_evidence"
-            answer = BAD_CITATIONS_ANSWER
-            missing = missing or ("other",)
-        elif status == "answered" and _states_uncertainty(answer):
+        status, answer, citations, missing, follow_up, refusal, drops = self._interpret(
+            payload, sources, machine
+        )
+        if status == "answered" and not _citations_consistent(answer, citations, sources):
+            repaired = self._retry_citations(messages, raw)
+            if repaired is not None:
+                status, answer, citations, missing, follow_up, refusal, extra = self._interpret(
+                    repaired, sources, machine, attempt=2
+                )
+                drops = drops + extra
+            if status == "answered" and not _citations_consistent(answer, citations, sources):
+                status = "insufficient_evidence"
+                answer = BAD_CITATIONS_ANSWER
+                citations = ()
+                missing = missing or ("other",)
+        if status == "answered" and _states_uncertainty(answer):
             # The model listed related facts but concluded it cannot judge:
             # that is "insufficient evidence", not a supported answer.
             status = "insufficient_evidence"
             missing = missing or ("other",)
+        if drops:
+            LOGGER.info(
+                "citation drops: %s",
+                [(drop.source, drop.reason, drop.attempt) for drop in drops],
+            )
 
         if status == "answered" and (
             needs_guide_only(answer) or ("热床" in text and "电路" in text)
@@ -259,10 +289,16 @@ class Assistant:
                 machine=machine,
             )
         elif status == "insufficient_evidence":
-            # Dropping citation markers alone left uncited repair suggestions.
-            answer = BAD_CITATIONS_ANSWER
+            # Keep a specific "what is missing" explanation; markers are stripped in _finish.
+            # Suggestions or repair actions still degrade to the fixed safety text.
+            answer = answer if _is_specific_gap(answer) else BAD_CITATIONS_ANSWER
         elif status == "refused":
-            answer = DEFAULT_REFUSAL_ANSWER
+            # Keep an explained refusal, but never keep step-like instructions.
+            answer = (
+                answer
+                if answer and not INSUFFICIENT_PROCEDURE_RE.search(answer)
+                else DEFAULT_REFUSAL_ANSWER
+            )
 
         return self._finish(
             session,
@@ -275,7 +311,46 @@ class Assistant:
             refusal=refusal,
             machine_check=machine_check,
             usage=getattr(self.provider, "last_usage", None),
+            audit=drops,
         )
+
+    def _interpret(
+        self,
+        payload: dict[str, Any],
+        sources: list,
+        machine: str,
+        attempt: int = 1,
+    ) -> tuple[
+        str,
+        str,
+        tuple[Citation, ...],
+        tuple[str, ...],
+        str | None,
+        str | None,
+        tuple[CitationDrop, ...],
+    ]:
+        status = _normalize_status(payload.get("status"))
+        answer = str(payload.get("answer") or "").strip()
+        citations, drops = validate_citations_with_audit(
+            payload.get("citations"), sources, machine=machine, attempt=attempt
+        )
+        missing = _normalize_missing(payload.get("missing_information"))
+        follow_up = _optional_text(payload.get("follow_up_question"))
+        refusal = _normalize_refusal(payload.get("refusal_reason"))
+        return status, answer, citations, missing, follow_up, refusal, drops
+
+    def _retry_citations(self, messages: list[dict[str, str]], raw: str) -> dict[str, Any] | None:
+        repair_messages = [
+            *messages,
+            {"role": "assistant", "content": raw},
+            {"role": "user", "content": REPAIR_PROMPT},
+        ]
+        try:
+            raw_retry = self.provider.complete(repair_messages)
+            return parse_model_payload(raw_retry)
+        except (ProviderError, ModelOutputError) as exc:
+            LOGGER.info("citation repair failed: %s", type(exc).__name__)
+            return None
 
     def _finish(
         self,
@@ -290,6 +365,7 @@ class Assistant:
         refusal: str | None,
         machine_check: MachineCheck,
         usage: dict[str, int] | None = None,
+        audit: tuple[CitationDrop, ...] = (),
     ) -> ChatResult:
         if status == "answered":
             answer = answer or "无法给出回答。"
@@ -322,6 +398,7 @@ class Assistant:
             machine_check=machine_check,
             session=session.summary(),
             usage=usage,
+            citation_audit=audit,
         )
 
 
@@ -353,3 +430,21 @@ def _optional_text(value: Any) -> str | None:
 
 def _states_uncertainty(answer: str) -> bool:
     return bool(UNCERTAIN_CONCLUSION_RE.search(answer))
+
+
+def _is_specific_gap(answer: str) -> bool:
+    return (
+        bool(GAP_EXPLANATION_RE.search(answer))
+        and bool(GUIDE_POINTER_RE.search(answer))
+        and not INSUFFICIENT_PROCEDURE_RE.search(answer)
+    )
+
+
+def _citations_consistent(answer: str, citations: tuple[Citation, ...], sources: list) -> bool:
+    """Every marker in the answer must point at a valid citation's source."""
+    valid_chunks = {citation.chunk_id for citation in citations}
+    valid_markers = {
+        f"[{source.label}]" for source in sources if source.hit.chunk_id in valid_chunks
+    }
+    markers = set(CITATION_MARKER_RE.findall(answer))
+    return bool(citations) and markers <= valid_markers
