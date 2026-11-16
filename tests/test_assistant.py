@@ -68,6 +68,85 @@ class AssistantTest(unittest.TestCase):
         self.assertEqual(result.status, "insufficient_evidence")
         self.assertEqual(result.citations, ())
         self.assertEqual(result.answer, BAD_CITATIONS_ANSWER)
+        self.assertEqual([drop.reason for drop in result.citation_audit], ["unknown_source"])
+
+    def test_citation_retry_recovers_valid_answer(self):
+        bad = answered_payload(
+            answer="先断电 [S1]。",
+            citations=[{"source": "S1", "quote": "不存在的原文"}],
+        )
+        provider = FakeProvider([bad, answered_payload()])
+        result = Assistant(self.retriever, provider).answer("A1 热床不加热怎么办？", "a1")
+
+        self.assertEqual(result.status, "answered")
+        self.assertEqual(len(result.citations), 1)
+        self.assertEqual(len(provider.calls), 2)
+        self.assertEqual(
+            [(drop.reason, drop.attempt) for drop in result.citation_audit],
+            [("quote_not_found", 1)],
+        )
+
+    def test_citation_retry_failure_keeps_audit(self):
+        bad = answered_payload(
+            answer="先断电 [S1]。",
+            citations=[{"source": "S1", "quote": "不存在的原文"}],
+        )
+        provider = FakeProvider([bad, bad])
+        result = Assistant(self.retriever, provider).answer("A1 热床不加热怎么办？", "a1")
+
+        self.assertEqual(result.status, "insufficient_evidence")
+        self.assertEqual(result.answer, BAD_CITATIONS_ANSWER)
+        self.assertEqual(len(provider.calls), 2)
+        self.assertEqual(
+            [(drop.reason, drop.attempt) for drop in result.citation_audit],
+            [("quote_not_found", 1), ("quote_not_found", 2)],
+        )
+
+    def test_model_insufficient_explanation_is_preserved(self):
+        payload = answered_payload(
+            status="insufficient_evidence",
+            answer="资料没有给出重新接回的完整步骤，建议参考官方指南。 [S1]",
+            citations=[],
+        )
+        result = Assistant(self.retriever, FakeProvider(payload)).answer(
+            "A1 热床不加热怎么办？", "a1"
+        )
+
+        self.assertEqual(result.status, "insufficient_evidence")
+        self.assertIn("重新接回", result.answer)
+        self.assertNotIn(BAD_CITATIONS_ANSWER, result.answer)
+        self.assertNotIn("[S1]", result.answer)
+        self.assertEqual(result.citations, ())
+
+    def test_model_refusal_explanation_is_preserved(self):
+        payload = answered_payload(
+            status="refused",
+            answer="不能用手直接拿高温喷嘴，有烫伤风险，请参考官方指南。",
+            citations=[],
+            refusal_reason="unsafe_procedure",
+        )
+        result = Assistant(self.retriever, FakeProvider(payload)).answer(
+            "A1 热床不加热怎么办？", "a1"
+        )
+
+        self.assertEqual(result.status, "refused")
+        self.assertIn("烫伤风险", result.answer)
+        self.assertNotIn("这个问题超出首版", result.answer)
+        self.assertEqual(result.refusal_reason, "unsafe_procedure")
+
+    def test_refusal_with_step_like_text_falls_back_to_default(self):
+        payload = answered_payload(
+            status="refused",
+            answer="不能这样操作，但你可以先断电，然后再重新接线。",
+            citations=[],
+            refusal_reason="unsafe_procedure",
+        )
+        result = Assistant(self.retriever, FakeProvider(payload)).answer(
+            "A1 热床不加热怎么办？", "a1"
+        )
+
+        self.assertEqual(result.status, "refused")
+        self.assertEqual(result.answer, "这个问题超出首版可依据官方资料回答的范围。")
 
     def test_marker_without_valid_quote_downgrades_entire_answer(self):
         provider = FakeProvider(answered_payload(answer="先断电 [S1]，然后测量 [S9]。"))

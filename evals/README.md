@@ -73,6 +73,13 @@ python evals/run_assistant_eval.py --db runtime/printcare.sqlite3 --k 8
 每题独立建立会话，避免不同题之间泄漏上下文。运行真实评估会调用模型并产生费用。
 新增自动回归使用模拟模型，只验证流程、引用规则和会话行为，不能替代真实多轮质量评估。
 
+## 引用审计与修复重试（第4项）
+
+- 评估 JSON 新增 `citation_drops`：逐条记录被丢弃引用的来源标签、原因（`unknown_source`、`empty_quote`、`quote_not_found`、`duplicate_source`、`invalid_item`）和尝试轮次，不记录正文。
+- 仅当模型返回 `answered` 但引用为空或 `[S#]` 指向无效引用时，追加一次“逐字引用原文”的修正调用；仍需失败才降级为 `insufficient_evidence`。
+- 模型给出的“缺口 + 官方指南指向”类 `insufficient_evidence` 会保留原说明；含步骤化建议时仍回退固定安全文案。有解释的 `refused` 也会保留，含步骤化文本则回退固定文案。
+- 术语探针 `DEF-TERM-01` 的来源已更正为实际含“预紧力”定义的 HMS 页：`evals/term-probes-2026-11-16.jsonl`。原 `belt_tension` 页不含该词，理由与结果见[第4项验收记录](citation-stability-2026-11-16.md)。
+
 ## 重要限制
 
 - 这是**检索级与状态级**基线，不评价答案是否忠实、引用是否支持结论；不能据此宣称回答质量达标。
