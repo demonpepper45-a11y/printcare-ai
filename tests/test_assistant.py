@@ -182,6 +182,18 @@ class AssistantTest(unittest.TestCase):
         self.assertEqual(result.citations, ())
         self.assertNotIn("[S1]", result.answer)
 
+    def test_uncertainty_with_interleaved_adverb_also_downgrades(self):
+        provider = FakeProvider(
+            answered_payload(
+                answer="资料没有给出判定标准，因此无法据此判断是否正常。",
+            )
+        )
+        assistant = Assistant(self.retriever, provider)
+
+        result = assistant.answer("热床不加热能判断是主板坏了吗？", "a1")
+
+        self.assertEqual(result.status, "insufficient_evidence")
+
     def test_normal_answer_keeps_answered_status(self):
         provider = FakeProvider(answered_payload())
         assistant = Assistant(self.retriever, provider)

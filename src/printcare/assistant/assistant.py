@@ -31,13 +31,10 @@ VALID_MISSING = {
 }
 VALID_REFUSALS = {"no_reliable_source", "out_of_scope", "unsafe_procedure", "unsupported_machine"}
 CITATION_MARKER_RE = re.compile(r"\[S\d+\]")
-UNCERTAIN_CONCLUSION_PHRASES = (
-    "无法判断",
-    "无法直接判断",
-    "无法确定",
-    "不能确定",
-    "无法给出结论",
-    "无法得出结论",
+UNCERTAIN_CONCLUSION_RE = re.compile(
+    r"(无法|不能)"
+    r"(?:直接|据此|准确|明确|完全|仅凭)?"
+    r"(判断|确定|给出结论|得出结论)"
 )
 
 NO_HITS_ANSWER = "现有官方资料没有覆盖这个问题，无法给出有依据的结论。"
@@ -261,4 +258,4 @@ def _optional_text(value: Any) -> str | None:
 
 
 def _states_uncertainty(answer: str) -> bool:
-    return any(phrase in answer for phrase in UNCERTAIN_CONCLUSION_PHRASES)
+    return bool(UNCERTAIN_CONCLUSION_RE.search(answer))
