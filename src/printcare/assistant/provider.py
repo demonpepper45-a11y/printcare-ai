@@ -133,6 +133,7 @@ class FakeProvider:
     """Scripted provider for tests; records every call."""
 
     name = "fake"
+    model = "fake"
 
     def __init__(self, responses: Sequence[str] | str) -> None:
         if isinstance(responses, str):

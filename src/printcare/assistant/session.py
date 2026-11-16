@@ -62,6 +62,9 @@ class Session:
         self.history = self.history[-5:]
         self.updated_at = _now()
 
+    def touch(self) -> None:
+        self.updated_at = _now()
+
     def to_dict(self) -> dict[str, object]:
         return {
             "session_id": self.session_id,

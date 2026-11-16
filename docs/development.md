@@ -86,6 +86,20 @@ python -m printcare.assistant --db runtime/printcare.sqlite3 --machine a1 --ques
 - 多轮会话：`--session runtime/session.json` 会在文件里保存机型、现象与历史轮次。
 - 真实模型评估见 [回答评估记录](../evals/assistant-baseline.md)；自动检查不等于人工核验，不得据此宣称回答准确。
 
+## API 与页面（T08）
+
+```powershell
+$env:PYTHONPATH='src'
+python -m printcare.api --host 127.0.0.1 --port 8000      # 先启动 API
+streamlit run src/printcare/web/app.py                    # 另一个终端启动页面
+```
+
+- 页面通过 `PRINTCARE_API_URL`（默认 `http://127.0.0.1:8000`）访问 API。
+- 管理操作需要 `PRINTCARE_ADMIN_TOKEN`；页面侧边栏填写同一个令牌。未设置令牌且 `PRINTCARE_ENVIRONMENT=local` 时，本机开发放行，其他环境返回 503。
+- `POST /api/v1/admin/refresh` 是同步接口，只适合小批量（≤20 篇）；完整采集仍用命令行。
+- 会话保存在 API 进程内存中，空闲 30 分钟过期，重启即丢失；持久化留待 T09。
+- 接口字段、错误码与管理接口见 [接口契约](interfaces.md)；反馈写入运行时数据库的 `feedback` 表。
+
 ## 配置
 
 配置全部来自 `PRINTCARE_` 前缀的进程环境变量，变量清单见 [.env.example](../.env.example)。真实值放在本机 `.env` 或部署环境的秘密配置中，由启动方式注入；当前版本没有入口服务，也不会自动加载 `.env`。`.env`、运行数据库和索引目录已被忽略，不得提交。

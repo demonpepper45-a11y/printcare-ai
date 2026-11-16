@@ -37,6 +37,7 @@ class Settings:
     model_api_key_file: Path | None = None
     model_base_url: str | None = None
     model_name: str = "deepseek-flash"
+    admin_token: str | None = None
 
     @classmethod
     def from_env(cls, environ: Mapping[str, str] | None = None) -> Settings:
@@ -56,6 +57,7 @@ class Settings:
             model_api_key_file=Path(key_file) if key_file else None,
             model_base_url=_value(source, "MODEL_BASE_URL") or None,
             model_name=_value(source, "MODEL_NAME") or "deepseek-flash",
+            admin_token=_value(source, "ADMIN_TOKEN") or None,
         )
 
     def describe(self) -> dict[str, object]:
@@ -69,6 +71,7 @@ class Settings:
             "model_api_key_file": str(self.model_api_key_file) if self.model_api_key_file else None,
             "model_base_url": self.model_base_url,
             "model_name": self.model_name,
+            "admin_token_configured": bool(self.admin_token),
         }
 
 
