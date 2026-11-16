@@ -117,9 +117,12 @@ def validate_citations(
             dropped += 1
             continue
         hit = source.hit
-        normalized_text = normalize_whitespace(hit.text)
+        visible_fields = (hit.title, hit.text[:MAX_SOURCE_CHARS])
+        normalized_fields = tuple(normalize_whitespace(field) for field in visible_fields)
         normalized_quote = normalize_whitespace(quote)
-        if not normalized_quote or normalized_quote not in normalized_text:
+        if not normalized_quote or not any(
+            normalized_quote in field for field in normalized_fields
+        ):
             dropped += 1
             continue
         truncated = len(normalized_quote) > max_quote

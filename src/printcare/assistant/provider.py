@@ -29,7 +29,7 @@ class ModelProvider(Protocol):
         messages: Sequence[Mapping[str, str]],
         *,
         temperature: float = 0.0,
-        max_tokens: int = 1200,
+        max_tokens: int = 2400,
     ) -> str: ...
 
 
@@ -74,7 +74,7 @@ class DeepSeekProvider:
         messages: Sequence[Mapping[str, str]],
         *,
         temperature: float = 0.0,
-        max_tokens: int = 1200,
+        max_tokens: int = 2400,
     ) -> str:
         payload: dict[str, Any] = {
             "model": self.model,
@@ -148,7 +148,7 @@ class FakeProvider:
         messages: Sequence[Mapping[str, str]],
         *,
         temperature: float = 0.0,
-        max_tokens: int = 1200,
+        max_tokens: int = 2400,
     ) -> str:
         self.calls.append([dict(message) for message in messages])
         if not self._responses:

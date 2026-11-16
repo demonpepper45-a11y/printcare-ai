@@ -54,6 +54,10 @@ def detect_unsupported_models(text: str) -> tuple[str, ...]:
 
 
 def tokenize(text: str) -> tuple[str, ...]:
+    # Normalise a small, explicit domain vocabulary on both sides of retrieval.
+    # This does not infer a fault or change model/HMS detection.
+    text = re.sub(r"第一层|初始层", "首层", text)
+    text = re.sub(r"(?<!同步)皮带", "同步带", text)
     tokens: list[str] = []
     for run in CJK_RUN_RE.findall(text):
         if len(run) == 1:

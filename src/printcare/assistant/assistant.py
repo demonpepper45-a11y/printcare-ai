@@ -18,6 +18,7 @@ from printcare.assistant.prompts import build_messages
 from printcare.assistant.provider import ModelProvider
 from printcare.assistant.session import Session, SessionSummary
 from printcare.retrieval.retriever import Retriever
+from printcare.retrieval.tokenize import detect_machines, detect_unsupported_models
 
 VALID_STATUSES = {"answered", "needs_clarification", "insufficient_evidence", "refused"}
 VALID_MISSING = {
@@ -99,6 +100,20 @@ class Assistant:
         session = session or Session.create(machine)
         if session.machine != machine:
             session.correct_machine(machine)
+        # Resolve an elliptical follow-up before retrieval, not just in the
+        # model prompt. Check the current question first so context cannot hide
+        # a conflicting or unsupported model mention.
+        issue = session.reported_issue
+        if (
+            not retrieval.warning
+            and issue
+            and re.match(
+                r"^(那|然后|还是|仍然|已经|已|刚才|如果|试过|换了|第一步|第二步|下一步)", text
+            )
+            and set(detect_machines(issue)) <= {machine}
+            and not detect_unsupported_models(issue)
+        ):
+            retrieval = self.retriever.query(f"{issue}\n{text}", machine, limit=self.k)
         machine_check = MachineCheck(
             requested=machine,
             detected_in_question=detected,
@@ -158,7 +173,12 @@ class Assistant:
         follow_up = _optional_text(payload.get("follow_up_question"))
         refusal = _normalize_refusal(payload.get("refusal_reason"))
 
-        if status == "answered" and not citations:
+        valid_chunks = {citation.chunk_id for citation in citations}
+        valid_markers = {
+            f"[{source.label}]" for source in sources if source.hit.chunk_id in valid_chunks
+        }
+        markers = set(CITATION_MARKER_RE.findall(answer))
+        if status == "answered" and (not citations or not markers <= valid_markers):
             status = "insufficient_evidence"
             answer = BAD_CITATIONS_ANSWER
             missing = missing or ("other",)
@@ -213,7 +233,7 @@ class Assistant:
         if status != "answered":
             answer = CITATION_MARKER_RE.sub("", answer).strip()
 
-        session.record_turn(question, status)
+        session.record_turn(question, status, record_issue=machine_check.result != "mismatch")
         return ChatResult(
             request_id=f"req_{uuid.uuid4().hex[:12]}",
             session_id=session.session_id,

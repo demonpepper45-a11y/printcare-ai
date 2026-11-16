@@ -18,12 +18,13 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from urllib.parse import urlsplit
 
 from printcare.assistant.assistant import Assistant
 from printcare.assistant.provider import DEFAULT_BASE_URL, DeepSeekProvider
+from printcare.assistant.session import Session
 from printcare.retrieval.retriever import Retriever
 from printcare.settings import Settings, resolve_model_api_key
 
@@ -45,6 +46,7 @@ class Question:
     expected_evidence: tuple[str, ...]
     forbidden_evidence: tuple[str, ...]
     expected_refusal_reason: str | None = None
+    context_turns: tuple[dict, ...] = ()
 
 
 def load_questions(path: Path) -> list[Question]:
@@ -63,6 +65,7 @@ def load_questions(path: Path) -> list[Question]:
                 expected_evidence=tuple(payload.get("expected_evidence") or ()),
                 forbidden_evidence=tuple(payload.get("forbidden_evidence") or ()),
                 expected_refusal_reason=payload.get("expected_refusal_reason"),
+                context_turns=tuple(payload.get("context_turns") or ()),
             )
         )
     return questions
@@ -75,11 +78,30 @@ def canonical_path_from_url(url: str) -> str:
     return "/".join(parts).lower()
 
 
-def evaluate_question(assistant: Assistant, question: Question) -> dict:
-    if question.category == "multi_turn":
-        return {"id": question.id, "verdict": "SKIP", "note": "requires conversation (T07 session)"}
+def evaluate_question(
+    assistant: Assistant, question: Question, session: Session | None = None
+) -> dict:
+    context_results = []
+    if question.category == "multi_turn" and not question.context_turns:
+        return {"id": question.id, "verdict": "FAIL", "note": "missing explicit context_turns"}
+    if question.context_turns:
+        session = Session.create(question.context_turns[0].get("machine", question.machine))
+        for index, turn in enumerate(question.context_turns):
+            context_question = replace(
+                question,
+                id=f"{question.id}/context-{index + 1}",
+                category="direct_qa",
+                question=turn["question"],
+                machine=turn.get("machine", question.machine),
+                expected_status=turn["expected_status"],
+                expected_evidence=tuple(turn.get("expected_evidence") or ()),
+                forbidden_evidence=tuple(turn.get("forbidden_evidence") or ()),
+                expected_refusal_reason=turn.get("expected_refusal_reason"),
+                context_turns=(),
+            )
+            context_results.append(evaluate_question(assistant, context_question, session))
 
-    result = assistant.answer(question.question, question.machine)
+    result = assistant.answer(question.question, question.machine, session)
     cited = {canonical_path_from_url(citation.source_url) for citation in result.citations}
     missing = [path for path in question.expected_evidence if path not in cited]
     leaked = [path for path in question.forbidden_evidence if path in cited]
@@ -93,6 +115,11 @@ def evaluate_question(assistant: Assistant, question: Question) -> dict:
         passed = status_ok and evidence_ok
     else:
         passed = status_ok and reason_ok and not result.citations
+    passed = passed and all(item["verdict"] == "PASS" for item in context_results)
+    usage = dict(result.usage or {})
+    for item in context_results:
+        for key in ("prompt_tokens", "completion_tokens"):
+            usage[key] = int(usage.get(key) or 0) + int(item["usage"].get(key) or 0)
     return {
         "id": question.id,
         "category": question.category,
@@ -104,7 +131,18 @@ def evaluate_question(assistant: Assistant, question: Question) -> dict:
         "leaked_evidence": leaked,
         "answer": result.answer,
         "citation_quotes": [citation.quote for citation in result.citations],
-        "usage": result.usage or {},
+        "citation_sources": [
+            {
+                "url": citation.source_url,
+                "section": list(citation.section_path),
+                "quote": citation.quote,
+            }
+            for citation in result.citations
+        ],
+        "follow_up_question": result.follow_up_question,
+        "refusal_reason": result.refusal_reason,
+        "usage": usage,
+        "context_results": context_results,
     }
 
 
@@ -112,7 +150,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--db", required=True)
     parser.add_argument("--questions", type=Path, default=DEFAULT_QUESTIONS)
-    parser.add_argument("--k", type=int, default=6)
+    parser.add_argument("--k", type=int, default=8)
     parser.add_argument("--limit", type=int)
     parser.add_argument("--model")
     parser.add_argument("--thinking", action="store_true")

@@ -69,6 +69,19 @@ class AssistantTest(unittest.TestCase):
         self.assertEqual(result.citations, ())
         self.assertEqual(result.answer, BAD_CITATIONS_ANSWER)
 
+    def test_marker_without_valid_quote_downgrades_entire_answer(self):
+        provider = FakeProvider(answered_payload(answer="先断电 [S1]，然后测量 [S9]。"))
+        result = Assistant(self.retriever, provider).answer("热床不加热怎么办？", "a1")
+        self.assertEqual(result.status, "insufficient_evidence")
+        self.assertEqual(result.answer, BAD_CITATIONS_ANSWER)
+        self.assertEqual(result.citations, ())
+
+    def test_valid_marker_is_preserved(self):
+        provider = FakeProvider(answered_payload(answer="先断电，再检查线缆 [S1]。"))
+        result = Assistant(self.retriever, provider).answer("热床不加热怎么办？", "a1")
+        self.assertEqual(result.status, "answered")
+        self.assertIn("[S1]", result.answer)
+
     def test_machine_mismatch_skips_model_call(self):
         provider = FakeProvider([])
         assistant = Assistant(self.retriever, provider)

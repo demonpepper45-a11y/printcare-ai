@@ -227,7 +227,7 @@ content_hash   = "sha256:" + sha256(normalized_document_text).hexdigest()
 | `anchor` | string\|null | 是 | | 跳转到章节 |
 | `machine` | Machine | 是 | | 该引用所属文档的机型 |
 | `official_updated_at` | datetime\|null | 是 | | 用户判断时效 |
-| `quote` | string | 是 | 1–200 字符 | 原文短引用，须为正文子串 |
+| `quote` | string | 是 | 1–200 字符 | 原文短引用，须为模型可见的官方标题或正文子串 |
 | `quote_truncated` | boolean | 是 | | 是否因长度截断 |
 
 `MachineCheck`：
@@ -245,7 +245,7 @@ content_hash   = "sha256:" + sha256(normalized_document_text).hexdigest()
 3. `status = insufficient_evidence` ⇒ `answer` 说明缺什么，且不得包含具体维护步骤。
 4. `status = refused` ⇒ `refusal_reason` 非空且 `citations` 为空。
 5. `machine_check.result = mismatch` ⇒ 不得直接 `answered`。
-6. 任何 `quote` 都必须是对应片段正文的子串，且长度 ≤ 200 字符。
+6. 任何 `quote` 都必须是模型可见的官方标题或片段正文（当前最多前 1,200 字符）的连续子串（归一化空白），且长度 ≤ 200 字符。正文标记若无对应的有效摘录，整条 answered 降为 insufficient_evidence；这仍不等于语义蕴含校验。
 7. 响应中的 `citations` 不得包含未启用的文档或已失效的片段。
 8. 不得返回跨机型片段：`citations[].machine` 必须等于请求机型（共享文档除外，共享文档须同时列出两机型）。
 
@@ -395,6 +395,9 @@ content_hash   = "sha256:" + sha256(normalized_document_text).hexdigest()
 ## 会话接口
 
 会话用于多轮排障：记录机型、现象与已尝试步骤，并允许更正。
+
+实现约定：更正机型时清空旧机型的现象、已尝试步骤和历史；同一次 PATCH 可提供新现象和步骤。
+冲突机型提问不会成为首次现象。省略主语的追问可使用当前现象辅助检索，仍先检查本轮显式机型。
 
 ### `SessionSummary`（问答响应内嵌）
 

@@ -2,6 +2,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
@@ -190,6 +191,45 @@ class CoreApiTest(ApiTestBase):
         response = client.get("/api/v1/sessions/s_aaaaaaaaaaaaaaaa")
 
         self.assertEqual(response.status_code, 404)
+
+    def test_followup_reuses_session_and_attempted_steps(self):
+        self.provider = FakeProvider([answered_payload(), answered_payload()])
+        client = self.make_client()
+        first = client.post(
+            "/api/v1/chat", json={"question": "热床不加热怎么办？", "machine": "a1"}
+        ).json()
+        session_id = first["session_id"]
+        client.patch(
+            f"/api/v1/sessions/{session_id}", json={"attempted_steps": ["线缆已经检查正常"]}
+        )
+        response = client.post(
+            "/api/v1/chat",
+            json={"question": "那还要查什么？", "machine": "a1", "session_id": session_id},
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["session_id"], session_id)
+        self.assertEqual(response.json()["status"], "answered")
+        self.assertIn("线缆已经检查正常", self.provider.calls[1][1]["content"])
+
+    def test_expired_session_followup_returns_404_without_model_call(self):
+        client = self.make_client()
+        with patch("printcare.api.sessions.time.monotonic", return_value=0):
+            first = client.post(
+                "/api/v1/chat", json={"question": "热床不加热", "machine": "a1"}
+            ).json()
+        calls = len(self.provider.calls)
+        with patch("printcare.api.sessions.time.monotonic", return_value=1801):
+            response = client.post(
+                "/api/v1/chat",
+                json={
+                    "question": "那还要查什么？",
+                    "machine": "a1",
+                    "session_id": first["session_id"],
+                },
+            )
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(response.json()["error"]["code"], "session_not_found")
+        self.assertEqual(len(self.provider.calls), calls)
 
     def test_feedback_is_recorded(self):
         client = self.make_client()

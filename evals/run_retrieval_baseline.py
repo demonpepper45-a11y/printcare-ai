@@ -92,6 +92,12 @@ def evaluate(questions: list[Question], retriever: Retriever, k: int) -> list[Ou
             )
             continue
 
+        if question.expected_status == "refused" and question.category != "unsupported_machine":
+            outcomes.append(
+                Outcome(question.id, question.category, "SKIP", "answer-level refusal check")
+            )
+            continue
+
         result = retriever.query(question.question, question.machine, limit=k)
         retrieved = [canonical_path_from_url(hit.source_url) for hit in result.hits]
 
