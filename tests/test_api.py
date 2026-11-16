@@ -246,6 +246,26 @@ class AdminApiTest(ApiTestBase):
 
         self.assertEqual(response.status_code, 404)
 
+    def test_disabled_document_disappears_from_search(self):
+        client = self.make_client()
+        doc_id = client.get(
+            "/api/v1/admin/documents", headers={"X-Admin-Token": "test-token"}
+        ).json()[0]["doc_id"]
+        client.patch(
+            f"/api/v1/admin/documents/{doc_id}",
+            json={"enabled": False},
+            headers={"X-Admin-Token": "test-token"},
+        )
+
+        response = client.post(
+            "/api/v1/chat",
+            json={"question": "A1 热床不加热怎么办？", "machine": "a1"},
+        )
+
+        self.assertEqual(response.json()["status"], "refused")
+        self.assertEqual(response.json()["refusal_reason"], "no_reliable_source")
+        self.assertEqual(self.provider.calls, [])
+
     def test_refresh_ingests_from_inventory(self):
         client = self.make_client()
 

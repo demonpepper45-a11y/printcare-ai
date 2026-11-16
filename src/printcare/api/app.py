@@ -222,6 +222,7 @@ def _add_routes(app: FastAPI) -> None:
                 status_code=404,
                 detail={"code": "not_found", "message": "文档不存在"},
             )
+        _reload_index(request.app)
         for item in list_documents(request.app.state.db_path):
             if item["doc_id"] == doc_id:
                 return DocumentModel(**item)
@@ -243,10 +244,7 @@ def _add_routes(app: FastAPI) -> None:
             report = run_ingestion(refs, request.app.state.page_fetcher, store)
         finally:
             store.close()
-        request.app.state.retriever = Retriever.from_sqlite(str(request.app.state.db_path))
-        request.app.state.assistant = Assistant(
-            request.app.state.retriever, request.app.state.provider
-        )
+        _reload_index(request.app)
         return RefreshResponse(
             run_id=report.run_id,
             parsed=report.parsed,
@@ -273,6 +271,12 @@ def _add_routes(app: FastAPI) -> None:
     )
     def admin_feedback(request: Request) -> FeedbackSummary:
         return FeedbackSummary(**request.app.state.feedback.summary())
+
+
+def _reload_index(app: FastAPI) -> None:
+    """Rebuild the in-memory retriever after documents change."""
+    app.state.retriever = Retriever.from_sqlite(str(app.state.db_path))
+    app.state.assistant = Assistant(app.state.retriever, app.state.provider)
 
 
 def _load_session(request: Request, session_id: str) -> Session:
