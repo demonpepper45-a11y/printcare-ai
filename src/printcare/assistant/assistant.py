@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 from printcare.assistant.context import (
@@ -14,6 +14,7 @@ from printcare.assistant.context import (
     select_sources,
     validate_citations,
 )
+from printcare.assistant.policy import needs_guide_only, refuses_modification
 from printcare.assistant.prompts import build_messages
 from printcare.assistant.provider import ModelProvider
 from printcare.assistant.session import Session, SessionSummary
@@ -149,6 +150,28 @@ class Assistant:
                 refusal="unsupported_machine",
                 machine_check=machine_check,
             )
+        if refuses_modification(retrieval.query):
+            return self._finish(
+                session,
+                text,
+                status="refused",
+                answer="首版不提供加装腔体加热或绕过安全保护的改装指导，请咨询设备官方支持。",
+                citations=(),
+                missing=(),
+                follow_up=None,
+                refusal="unsafe_procedure",
+                machine_check=machine_check,
+            )
+        # A conjunction is a request about both topics. Search each explicitly;
+        # do not let the dominant topic consume the entire source window.
+        combined_query = retrieval.query
+        if "热床" in combined_query and "电路" in combined_query:
+            extra = self.retriever.query("电路故障", machine, limit=12)
+            existing = {hit.chunk_id for hit in retrieval.hits}
+            additions = tuple(
+                hit for hit in extra.hits if "电路" in hit.title and hit.chunk_id not in existing
+            )[:2]
+            retrieval = replace(retrieval, hits=retrieval.hits + additions)
         if not retrieval.hits:
             return self._finish(
                 session,
@@ -187,6 +210,35 @@ class Assistant:
             # that is "insufficient evidence", not a supported answer.
             status = "insufficient_evidence"
             missing = missing or ("other",)
+
+        if status == "answered" and (
+            needs_guide_only(answer) or ("热床" in text and "电路" in text)
+        ):
+            # Do not emit model-written invasive procedures until their safety
+            # dependencies can be verified. Preserve only official guide titles.
+            cited_docs = {citation.doc_id for citation in citations}
+            chosen = []
+            seen_docs = set()
+            for source in sources:
+                hit = source.hit
+                requested_circuit = "电路" in text and "电路" in hit.title
+                if (hit.doc_id in cited_docs or requested_circuit) and hit.doc_id not in seen_docs:
+                    chosen.append(source)
+                    seen_docs.add(hit.doc_id)
+            answer = (
+                "该问题涉及设备维护；当前仅提供官方指南入口，完整步骤及前置条件请在原文核对：\n"
+            )
+            answer += "\n".join(f"- {source.hit.title} [{source.label}]" for source in chosen)
+            citations, _ = validate_citations(
+                [{"source": source.label, "quote": source.hit.title[:200]} for source in chosen],
+                sources,
+                machine=machine,
+            )
+        elif status == "insufficient_evidence":
+            # Dropping citation markers alone left uncited repair suggestions.
+            answer = BAD_CITATIONS_ANSWER
+        elif status == "refused":
+            answer = DEFAULT_REFUSAL_ANSWER
 
         return self._finish(
             session,

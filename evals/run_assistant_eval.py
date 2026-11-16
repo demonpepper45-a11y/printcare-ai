@@ -130,6 +130,7 @@ def evaluate_question(
         "missing_evidence": missing,
         "leaked_evidence": leaked,
         "answer": result.answer,
+        "answer_mode": "guide_only" if "当前仅提供官方指南入口" in result.answer else "other",
         "citation_quotes": [citation.quote for citation in result.citations],
         "citation_sources": [
             {
@@ -206,6 +207,7 @@ def main(argv: list[str] | None = None) -> int:
         "completion_tokens": completion_tokens,
         "estimated_cost_usd": round(cost, 4),
         "model": provider.model,
+        "guide_only": sum(item.get("answer_mode") == "guide_only" for item in results),
     }
     args.json_out.parent.mkdir(parents=True, exist_ok=True)
     args.json_out.write_text(
