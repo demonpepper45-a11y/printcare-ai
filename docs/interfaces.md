@@ -15,11 +15,12 @@
 5. [标识、去重与更新](#标识去重与更新)
 6. [问答接口](#问答接口)
 7. [会话接口](#会话接口)
-8. [错误格式](#错误格式)
-9. [接口层的机型与依据规则](#接口层的机型与依据规则)
-10. [版本与兼容](#版本与兼容)
-11. [待确认事项](#待确认事项)
-12. [对后续任务的约束](#对后续任务的约束)
+8. [管理接口与反馈](#管理接口与反馈t08-实现)
+9. [错误格式](#错误格式)
+10. [接口层的机型与依据规则](#接口层的机型与依据规则)
+11. [版本与兼容](#版本与兼容)
+12. [待确认事项](#待确认事项)
+13. [对后续任务的约束](#对后续任务的约束)
 
 ## 设计原则
 
@@ -423,7 +424,46 @@ content_hash   = "sha256:" + sha256(normalized_document_text).hexdigest()
 
 ### 保留期
 
-会话默认保留 30 天，超期自动清除；具体时长与隐私说明待负责人确认（见待确认事项）。
+当前实现（T08）：会话保存在服务进程内，空闲 30 分钟过期，服务重启即丢失。
+持久化与更长的保留期需要 T09 的服务端存储方案，具体时长与隐私说明待负责人确认（见待确认事项）。
+
+## 管理接口与反馈（T08 实现）
+
+### `GET /api/v1/health`
+
+返回 `{status, documents, chunks, model}`，用于页面与部署探活。
+
+### `GET /api/v1/machines`
+
+返回机型枚举与显示名：`[{"code": "a1", "label": "拓竹 A1"}, ...]`。
+
+### `POST /api/v1/feedback`
+
+| 字段 | 类型 | 必填 | 约束 |
+|---|---|---|---|
+| `session_id` | string | 是 | 会话标识 |
+| `solved` | boolean | 是 | 是否解决 |
+| `comment` | string\|null | 否 | ≤500 字符，自愿填写 |
+
+返回 `{"id": 1}`。反馈写入运行时 SQLite 的 `feedback` 表。
+
+### 管理接口（需要认证）
+
+| 方法与路径 | 用途 | 请求/响应 |
+|---|---|---|
+| `GET /api/v1/admin/documents` | 资料状态 | 可选查询参数 `machine`；返回文档列表（含 `enabled`、`chunk_count`、官方更新时间） |
+| `PATCH /api/v1/admin/documents/{doc_id}` | 启用/停用资料 | `{"enabled": false}`；返回更新后的文档 |
+| `POST /api/v1/admin/refresh` | 手动更新资料 | `{"paths"?: string[], "limit"?: 1–20}`；同步执行采集解析，返回本次运行统计与失败列表 |
+| `GET /api/v1/admin/feedback` | 反馈汇总 | 返回 `{total, solved, unsolved}` |
+
+认证方式：请求头 `X-Admin-Token` 必须等于 `PRINTCARE_ADMIN_TOKEN`。
+未配置令牌时，只有 `PRINTCARE_ENVIRONMENT=local` 的本机开发允许访问；
+其他环境返回 `503 admin_not_configured`，令牌错误返回 `401 unauthorized`。
+
+注意：
+
+- `admin/refresh` 为同步接口，只适合小批量（≤20 篇）；大批量采集应使用命令行。
+- 刷新完成后服务会重建内存检索索引；停用文档同样只影响本次进程的后续查询需重新加载。
 
 ## 错误格式
 
@@ -446,6 +486,9 @@ content_hash   = "sha256:" + sha256(normalized_document_text).hexdigest()
 | `validation_failed` | 422 | 字段存在但不满足约束（长度、格式、枚举） |
 | `unsupported_machine` | 422 | `machine` 不在枚举内 |
 | `session_not_found` | 404 | `session_id` 不存在或已过期 |
+| `unauthorized` | 401 | 管理令牌缺失或错误 |
+| `admin_not_configured` | 503 | 非 local 环境未配置管理令牌 |
+| `not_found` | 404 | 管理资源（如文档）不存在 |
 | `payload_too_large` | 413 | 请求体超过限制 |
 | `rate_limited` | 429 | 超过频率限制；需带 `Retry-After` |
 | `source_unavailable` | 503 | 依赖的资料服务不可用，且无缓存可用 |
