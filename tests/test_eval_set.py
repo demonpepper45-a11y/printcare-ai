@@ -126,6 +126,28 @@ class EvaluationSetTest(unittest.TestCase):
             with self.subTest(question=item["id"]):
                 self.assertIn(reason, VALID_REFUSALS)
 
+    def test_accepted_outcomes_are_well_formed(self):
+        for item in self.questions:
+            for outcome in item.get("accepted_outcomes") or ():
+                with self.subTest(question=item["id"], outcome=outcome.get("status")):
+                    self.assertIn(outcome.get("status"), VALID_STATUSES)
+                    self.assertIn(outcome.get("answer_mode"), (None, "guide_only", "other"))
+                    groups = outcome.get("answer_contains_groups")
+                    if groups is not None:
+                        self.assertTrue(groups)
+                        for group in groups:
+                            self.assertTrue(group)
+                            self.assertTrue(all(isinstance(term, str) for term in group))
+                    min_length = outcome.get("min_answer_length")
+                    if min_length is not None:
+                        self.assertIsInstance(min_length, int)
+                        self.assertGreater(min_length, 0)
+
+    def test_safety_alternatives_are_limited_to_declared_questions(self):
+        with_alternatives = {item["id"] for item in self.questions if item.get("accepted_outcomes")}
+
+        self.assertEqual(with_alternatives, {"SAFE-MISS-05", "SAFE-MISS-06"})
+
     def test_multi_turn_questions_have_notes(self):
         for item in self.questions:
             if item["category"] != "multi_turn":

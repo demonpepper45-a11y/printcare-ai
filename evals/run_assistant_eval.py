@@ -31,6 +31,8 @@ from printcare.settings import Settings, resolve_model_api_key
 DEFAULT_QUESTIONS = Path(__file__).resolve().parent / "questions.jsonl"
 DEFAULT_OUTPUT = Path("runtime/assistant-eval.json")
 LOCALES = {"en", "zh"}
+VALID_STATUSES = {"answered", "needs_clarification", "insufficient_evidence", "refused"}
+VALID_ANSWER_MODES = {None, "guide_only", "other"}
 # Conservative peak prices for deepseek-flash, USD per 1M tokens.
 INPUT_PRICE_PER_MILLION = 0.30
 OUTPUT_PRICE_PER_MILLION = 1.20
@@ -49,6 +51,36 @@ class Question:
     context_turns: tuple[dict, ...] = ()
     expected_answer_mode: str | None = None
     review_checks: tuple[str, ...] = ()
+    accepted_outcomes: tuple[dict, ...] = ()
+
+
+def _validate_outcome(outcome: dict, question_id: str, index: int) -> None:
+    if not isinstance(outcome, dict) or "status" not in outcome:
+        raise ValueError(f"{question_id}: accepted_outcomes[{index}] needs a status")
+    if outcome["status"] not in VALID_STATUSES:
+        raise ValueError(f"{question_id}: invalid accepted outcome status")
+    if outcome.get("answer_mode") not in VALID_ANSWER_MODES:
+        raise ValueError(f"{question_id}: invalid accepted outcome answer_mode")
+    for key in ("answer_contains_any", "answer_contains_all", "answer_not_contains"):
+        terms = outcome.get(key)
+        if terms is not None and (
+            not isinstance(terms, list) or not all(isinstance(term, str) for term in terms)
+        ):
+            raise ValueError(f"{question_id}: {key} must be a list of strings")
+    groups = outcome.get("answer_contains_groups")
+    if groups is not None and (
+        not isinstance(groups, list)
+        or not all(
+            isinstance(group, list) and group and all(isinstance(term, str) for term in group)
+            for group in groups
+        )
+    ):
+        raise ValueError(f"{question_id}: answer_contains_groups must be a list of term lists")
+    min_length = outcome.get("min_answer_length")
+    if min_length is not None and (
+        not isinstance(min_length, int) or isinstance(min_length, bool) or min_length < 0
+    ):
+        raise ValueError(f"{question_id}: min_answer_length must be a non-negative integer")
 
 
 def load_questions(path: Path) -> list[Question]:
@@ -59,6 +91,9 @@ def load_questions(path: Path) -> list[Question]:
         payload = json.loads(line)
         if payload.get("expected_answer_mode") not in (None, "guide_only", "other"):
             raise ValueError("invalid expected_answer_mode")
+        accepted_outcomes = tuple(payload.get("accepted_outcomes") or ())
+        for index, outcome in enumerate(accepted_outcomes):
+            _validate_outcome(outcome, str(payload.get("id")), index)
         questions.append(
             Question(
                 id=payload["id"],
@@ -72,6 +107,7 @@ def load_questions(path: Path) -> list[Question]:
                 context_turns=tuple(payload.get("context_turns") or ()),
                 expected_answer_mode=payload.get("expected_answer_mode"),
                 review_checks=tuple(payload.get("review_checks") or ()),
+                accepted_outcomes=accepted_outcomes,
             )
         )
     return questions
@@ -82,6 +118,62 @@ def canonical_path_from_url(url: str) -> str:
     if parts and parts[0] in LOCALES:
         parts = parts[1:]
     return "/".join(parts).lower()
+
+
+def _default_outcome(question: Question) -> dict:
+    return {
+        "status": question.expected_status,
+        "answer_mode": question.expected_answer_mode,
+        "refusal_reason": question.expected_refusal_reason,
+        "expected_evidence": list(question.expected_evidence),
+    }
+
+
+def _outcome_matches(
+    question: Question,
+    outcome: dict,
+    result,
+    cited: set[str],
+    answer_mode: str,
+) -> bool:
+    """Check one accepted outcome, including its content conditions.
+
+    Non-answered alternatives must not carry citations, and answered outcomes
+    must cite the declared evidence and avoid forbidden machine documents.
+    """
+    if result.status != outcome.get("status"):
+        return False
+    expected_reason = outcome.get("refusal_reason")
+    if expected_reason is not None and result.refusal_reason != expected_reason:
+        return False
+
+    if outcome.get("status") == "answered":
+        expected = outcome.get("expected_evidence", list(question.expected_evidence))
+        if any(path not in cited for path in expected):
+            return False
+        if any(path in cited for path in question.forbidden_evidence):
+            return False
+    elif result.citations:
+        return False
+
+    mode = outcome.get("answer_mode")
+    if mode is not None and answer_mode != mode:
+        return False
+
+    answer = result.answer
+    for term in outcome.get("answer_contains_all") or ():
+        if term not in answer:
+            return False
+    any_terms = outcome.get("answer_contains_any")
+    if any_terms and not any(term in answer for term in any_terms):
+        return False
+    for group in outcome.get("answer_contains_groups") or ():
+        if not any(term in answer for term in group):
+            return False
+    if any(term in answer for term in outcome.get("answer_not_contains") or ()):
+        return False
+    min_length = outcome.get("min_answer_length")
+    return not (min_length and len(answer) < min_length)
 
 
 def evaluate_question(
@@ -113,19 +205,22 @@ def evaluate_question(
     cited = {canonical_path_from_url(citation.source_url) for citation in result.citations}
     missing = [path for path in question.expected_evidence if path not in cited]
     leaked = [path for path in question.forbidden_evidence if path in cited]
-    status_ok = result.status == question.expected_status
-    reason_ok = (
-        question.expected_refusal_reason is None
-        or result.refusal_reason == question.expected_refusal_reason
-    )
-    evidence_ok = not missing and not leaked
-    if question.expected_status == "answered":
-        passed = status_ok and evidence_ok
-    else:
-        passed = status_ok and reason_ok and not result.citations
     answer_mode = "guide_only" if "当前仅提供官方指南入口" in result.answer else "other"
-    mode_ok = question.expected_answer_mode is None or answer_mode == question.expected_answer_mode
-    passed = passed and mode_ok and all(item["verdict"] == "PASS" for item in context_results)
+    outcomes = question.accepted_outcomes or (_default_outcome(question),)
+    matched_outcome = None
+    for index, outcome in enumerate(outcomes):
+        if _outcome_matches(question, outcome, result, cited, answer_mode):
+            matched_outcome = index
+            break
+    if question.accepted_outcomes:
+        mode_ok = matched_outcome is not None
+    else:
+        mode_ok = (
+            question.expected_answer_mode is None or answer_mode == question.expected_answer_mode
+        )
+    passed = matched_outcome is not None and all(
+        item["verdict"] == "PASS" for item in context_results
+    )
     usage = dict(result.usage or {})
     for item in context_results:
         for key in ("prompt_tokens", "completion_tokens"):
@@ -143,6 +238,8 @@ def evaluate_question(
         "answer_mode": answer_mode,
         "expected_answer_mode": question.expected_answer_mode,
         "answer_mode_ok": mode_ok,
+        "accepted_outcomes": list(outcomes),
+        "matched_outcome": matched_outcome,
         "review_checks": list(question.review_checks),
         "citation_quotes": [citation.quote for citation in result.citations],
         "citation_sources": [
