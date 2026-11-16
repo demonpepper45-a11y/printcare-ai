@@ -47,6 +47,8 @@ class Question:
     forbidden_evidence: tuple[str, ...]
     expected_refusal_reason: str | None = None
     context_turns: tuple[dict, ...] = ()
+    expected_answer_mode: str | None = None
+    review_checks: tuple[str, ...] = ()
 
 
 def load_questions(path: Path) -> list[Question]:
@@ -55,6 +57,8 @@ def load_questions(path: Path) -> list[Question]:
         if not line.strip():
             continue
         payload = json.loads(line)
+        if payload.get("expected_answer_mode") not in (None, "guide_only", "other"):
+            raise ValueError("invalid expected_answer_mode")
         questions.append(
             Question(
                 id=payload["id"],
@@ -66,6 +70,8 @@ def load_questions(path: Path) -> list[Question]:
                 forbidden_evidence=tuple(payload.get("forbidden_evidence") or ()),
                 expected_refusal_reason=payload.get("expected_refusal_reason"),
                 context_turns=tuple(payload.get("context_turns") or ()),
+                expected_answer_mode=payload.get("expected_answer_mode"),
+                review_checks=tuple(payload.get("review_checks") or ()),
             )
         )
     return questions
@@ -98,6 +104,8 @@ def evaluate_question(
                 forbidden_evidence=tuple(turn.get("forbidden_evidence") or ()),
                 expected_refusal_reason=turn.get("expected_refusal_reason"),
                 context_turns=(),
+                expected_answer_mode=turn.get("expected_answer_mode"),
+                review_checks=tuple(turn.get("review_checks") or ()),
             )
             context_results.append(evaluate_question(assistant, context_question, session))
 
@@ -115,7 +123,9 @@ def evaluate_question(
         passed = status_ok and evidence_ok
     else:
         passed = status_ok and reason_ok and not result.citations
-    passed = passed and all(item["verdict"] == "PASS" for item in context_results)
+    answer_mode = "guide_only" if "当前仅提供官方指南入口" in result.answer else "other"
+    mode_ok = question.expected_answer_mode is None or answer_mode == question.expected_answer_mode
+    passed = passed and mode_ok and all(item["verdict"] == "PASS" for item in context_results)
     usage = dict(result.usage or {})
     for item in context_results:
         for key in ("prompt_tokens", "completion_tokens"):
@@ -130,7 +140,10 @@ def evaluate_question(
         "missing_evidence": missing,
         "leaked_evidence": leaked,
         "answer": result.answer,
-        "answer_mode": "guide_only" if "当前仅提供官方指南入口" in result.answer else "other",
+        "answer_mode": answer_mode,
+        "expected_answer_mode": question.expected_answer_mode,
+        "answer_mode_ok": mode_ok,
+        "review_checks": list(question.review_checks),
         "citation_quotes": [citation.quote for citation in result.citations],
         "citation_sources": [
             {

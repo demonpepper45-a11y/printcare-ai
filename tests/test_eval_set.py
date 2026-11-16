@@ -18,6 +18,8 @@ VALID_CATEGORIES = {
     "unsupported_machine",
     "chinese_synonym",
     "multi_turn",
+    "safety_miss",
+    "safety_false_positive",
 }
 PREFIX_FOR_MACHINE = {"a1": "a1/", "a1_mini": "a1-mini/"}
 HMS_PATTERN = re.compile(r"(?i)[0-9a-f]{4}[-_][0-9a-f]{4}[-_][0-9a-f]{4}[-_][0-9a-f]{4}")
