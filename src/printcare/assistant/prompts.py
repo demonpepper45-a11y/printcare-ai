@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 
 from printcare.assistant.context import Source, format_sources
+from printcare.assistant.policy import is_definition_question
 from printcare.assistant.session import SessionSummary
 
 SYSTEM_PROMPT = """你是 PrintCare AI，面向桌面 FDM 3D 打印机的售后助手。
@@ -57,6 +58,8 @@ def build_messages(
         if session.attempted_steps:
             parts.append("已尝试步骤：" + "；".join(session.attempted_steps))
     parts.append(f"用户问题：{question}")
+    if is_definition_question(question):
+        parts.append("本轮只解释错误码或术语的含义；不主动添加维修、拆装、接线或测量步骤。")
     parts.append("官方资料（只能依据这些内容作答）：")
     parts.append(format_sources(list(sources)))
     parts.append("请按系统要求输出 JSON。")

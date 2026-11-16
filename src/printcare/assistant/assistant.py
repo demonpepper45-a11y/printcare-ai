@@ -14,7 +14,12 @@ from printcare.assistant.context import (
     select_sources,
     validate_citations,
 )
-from printcare.assistant.policy import needs_guide_only, refuses_modification
+from printcare.assistant.definitions import find_hms_definition
+from printcare.assistant.policy import (
+    is_definition_question,
+    needs_guide_only,
+    refuses_modification,
+)
 from printcare.assistant.prompts import build_messages
 from printcare.assistant.provider import ModelProvider
 from printcare.assistant.session import Session, SessionSummary
@@ -186,6 +191,25 @@ class Assistant:
             )
 
         sources = build_sources(select_sources(retrieval.hits, self.max_per_doc))
+        if is_definition_question(text):
+            definition = find_hms_definition(text, sources)
+            if definition is not None:
+                source, meaning = definition
+                citations, _ = validate_citations(
+                    [{"source": source.label, "quote": meaning}], sources, machine=machine
+                )
+                if citations:
+                    return self._finish(
+                        session,
+                        text,
+                        status="answered",
+                        answer=f"该错误码的官方定义是：{meaning} [{source.label}]。",
+                        citations=citations,
+                        missing=(),
+                        follow_up=None,
+                        refusal=None,
+                        machine_check=machine_check,
+                    )
         messages = build_messages(text, machine, sources, session.summary())
         raw = self.provider.complete(messages)
         payload = parse_model_payload(raw)

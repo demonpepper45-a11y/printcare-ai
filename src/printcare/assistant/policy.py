@@ -59,3 +59,29 @@ def refuses_modification(question: str) -> bool:
 
 def needs_guide_only(answer: str) -> bool:
     return bool(REPAIR_ACTION_RE.search(answer))
+
+
+def is_definition_question(question: str) -> bool:
+    """Recognize explanation requests conservatively, excluding mixed actions."""
+    if not re.search(
+        r"含义|定义|什么意思|什么故障|是什么|什么是|meaning|what does|what is", question, re.I
+    ):
+        return False
+    # Split contrasts before removing explicitly declined actions. A following
+    # "but tell me the steps" must survive the negative clause.
+    clauses = re.split(r"[，,。；;！？!?\n]|但是|不过|而是|但|同时|另外", question)
+    remaining = []
+    for clause in clauses:
+        if re.match(r"\s*(?:不要|不需要|不用|无需|不必)", clause):
+            continue
+        remaining.append(clause)
+    request = " ".join(remaining)
+    request = re.sub(r"(?:怎么|如何|怎样)(?=理解|解释)", "", request)
+    if needs_guide_only(request):
+        return False
+    return not re.search(
+        r"怎么|如何|怎样|步骤|操作|维修|修理|排查|检查|更换|安装|拆|接线|测量|"
+        r"how (?:to|do)|steps|repair|replace|install|measure|instructions",
+        request,
+        re.I,
+    )
