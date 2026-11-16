@@ -20,6 +20,7 @@ def add_document(
     machines: tuple[str, ...],
     title: str,
     texts: tuple[str, ...],
+    headings: tuple[tuple[str, ...], ...] | None = None,
     section: str = "troubleshooting",
 ) -> str:
     doc_id = compute_doc_id(locale, path)
@@ -27,7 +28,7 @@ def add_document(
         Chunk(
             chunk_id=compute_chunk_id(doc_id, text),
             ordinal=index,
-            heading_path=("测试章节",),
+            heading_path=headings[index] if headings else ("测试章节",),
             anchor=None,
             text=text,
         )

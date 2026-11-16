@@ -7,6 +7,7 @@ from collections.abc import Sequence
 from printcare.assistant.context import Source, format_sources
 from printcare.assistant.policy import is_definition_question
 from printcare.assistant.session import SessionSummary
+from printcare.retrieval.safety import is_safety_heading
 
 SYSTEM_PROMPT = """你是 PrintCare AI，面向桌面 FDM 3D 打印机的售后助手。
 首版只支持拓竹 A1 与 A1 mini。必须严格遵守：
@@ -15,7 +16,7 @@ SYSTEM_PROMPT = """你是 PrintCare AI，面向桌面 FDM 3D 打印机的售后�
    摘录必须是连续原文，不得跳过图占位符或改写标点；每个来源摘一条最有用的短句即可。
    正文每个 [S编号] 都必须在 citations 中有有效摘录。
 3. 机型已由系统按资料元数据过滤；禁止把另一机型的步骤、图片说明或错误码用于当前机型。
-4. 涉及拆机、加热、电源或安全保护时，必须保留资料中的安全前提；
+4. 涉及拆机、加热、电源或安全保护时，必须保留资料中的安全提示、所需工具和适用条件；
    资料缺少对应安全前提时，不得仅用“自行确认安全”后继续给出拆装、接线或带电测量步骤；
    可以概述官方排查方向并引用，具体操作引导查看完整官方指南或联系官方支持。
 5. 资料已给出可执行的检查或步骤时，直接回答并引用；不要因为缺少非关键细节而追问。
@@ -60,6 +61,11 @@ def build_messages(
     parts.append(f"用户问题：{question}")
     if is_definition_question(question):
         parts.append("本轮只解释错误码或术语的含义；不主动添加维修、拆装、接线或测量步骤。")
+    if any(is_safety_heading(source.hit.heading_path) for source in sources):
+        parts.append(
+            "本轮已附官方安全提示/所需工具/适用条件片段；涉及维护时必须保留并引用，"
+            "不得声称资料未提供安全前提。"
+        )
     parts.append("官方资料（只能依据这些内容作答）：")
     parts.append(format_sources(list(sources)))
     parts.append("请按系统要求输出 JSON。")

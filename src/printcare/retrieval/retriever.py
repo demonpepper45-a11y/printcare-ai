@@ -11,6 +11,7 @@ from collections.abc import Sequence
 
 from printcare.retrieval.bm25 import BM25Index
 from printcare.retrieval.models import ChunkRecord, RetrievalHit, RetrievalResult
+from printcare.retrieval.safety import is_safety_heading, safety_category
 from printcare.retrieval.source import load_chunks
 from printcare.retrieval.tokenize import (
     detect_machines,
@@ -42,6 +43,42 @@ class Retriever:
 
     def machine_count(self, machine: str) -> int:
         return sum(1 for chunk in self.chunks if machine in chunk.machines)
+
+    def safety_hits(
+        self,
+        doc_ids: set[str],
+        machine: str,
+        limit: int = 6,
+    ) -> tuple[RetrievalHit, ...]:
+        """Official safety/tool/applicability chunks for the selected documents."""
+        if not doc_ids:
+            return ()
+        hits = []
+        for chunk in self.chunks:
+            if chunk.doc_id not in doc_ids or machine not in chunk.machines:
+                continue
+            if not is_safety_heading(chunk.heading_path):
+                continue
+            text = chunk.text.strip()
+            if not text or text.startswith("|"):
+                continue
+            hits.append(
+                RetrievalHit(
+                    chunk_id=chunk.chunk_id,
+                    doc_id=chunk.doc_id,
+                    score=0.0,
+                    text=chunk.text,
+                    heading_path=chunk.heading_path,
+                    anchor=chunk.anchor,
+                    source_url=chunk.source_url,
+                    title=chunk.title,
+                    machines=chunk.machines,
+                    section=chunk.section,
+                    official_updated_at=chunk.official_updated_at,
+                )
+            )
+        hits.sort(key=lambda hit: (safety_category(hit.heading_path), hit.doc_id, hit.chunk_id))
+        return tuple(hits[: max(0, limit)])
 
     def query(
         self,
