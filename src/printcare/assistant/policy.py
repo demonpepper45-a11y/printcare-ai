@@ -85,3 +85,15 @@ def is_definition_question(question: str) -> bool:
         request,
         re.I,
     )
+
+
+SAFETY_CONTEXT_RE = re.compile(
+    r"拆|装|换|清|维护|排查|检查|测量|接线|拔|插|脱开|接回|加热|温度|"
+    r"喷嘴|热端|热床|皮带|润滑|堵|故障|步骤|操作|校准",
+    re.I,
+)
+
+
+def needs_safety_context(question: str) -> bool:
+    """Maintenance/how-to questions need the official safety and tool sections."""
+    return bool(SAFETY_CONTEXT_RE.search(question)) and not is_definition_question(question)

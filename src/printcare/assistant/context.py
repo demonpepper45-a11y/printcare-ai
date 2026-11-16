@@ -9,6 +9,7 @@ from typing import Any
 from printcare.assistant.provider import strip_code_fence
 from printcare.ingestion.ids import normalize_whitespace
 from printcare.retrieval.models import RetrievalHit
+from printcare.retrieval.safety import is_safety_heading, safety_category
 
 MAX_QUOTE_CHARS = 200
 MAX_SOURCE_CHARS = 1200
@@ -70,6 +71,35 @@ def select_sources(
         counts[hit.doc_id] = used + 1
         selected.append(hit)
     return selected
+
+
+def include_safety_sources(
+    selected: list[RetrievalHit],
+    safety_hits: tuple[RetrievalHit, ...],
+    max_extra: int = 4,
+) -> list[RetrievalHit]:
+    """Append official safety/tool chunks, at most two per selected document."""
+    docs = {hit.doc_id for hit in selected}
+    seen = {hit.chunk_id for hit in selected}
+    quotas = {0: 2, 1: 2, 2: 1, 3: 1}
+    counts: dict[int, int] = {}
+    extras: list[RetrievalHit] = []
+    for hit in safety_hits:
+        if hit.doc_id not in docs or hit.chunk_id in seen:
+            continue
+        category = safety_category(hit.heading_path)
+        if counts.get(category, 0) >= quotas.get(category, 1):
+            continue
+        extras.append(hit)
+        seen.add(hit.chunk_id)
+        counts[category] = counts.get(category, 0) + 1
+        if len(extras) >= max_extra:
+            break
+    return [*selected, *extras]
+
+
+def safety_sources(sources: list[Source]) -> list[Source]:
+    return [source for source in sources if is_safety_heading(source.hit.heading_path)]
 
 
 def format_sources(sources: list[Source], max_chars: int = MAX_SOURCE_CHARS) -> str:

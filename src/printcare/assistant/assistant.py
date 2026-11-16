@@ -13,7 +13,9 @@ from printcare.assistant.context import (
     CitationDrop,
     ModelOutputError,
     build_sources,
+    include_safety_sources,
     parse_model_payload,
+    safety_sources,
     select_sources,
     validate_citations,
     validate_citations_with_audit,
@@ -22,6 +24,7 @@ from printcare.assistant.definitions import find_hms_definition
 from printcare.assistant.policy import (
     is_definition_question,
     needs_guide_only,
+    needs_safety_context,
     refuses_modification,
 )
 from printcare.assistant.prompts import build_messages
@@ -63,7 +66,7 @@ GUIDE_POINTER_RE = re.compile(
     r"联系[^。！？\n]{0,8}支持"
 )
 INSUFFICIENT_PROCEDURE_RE = re.compile(
-    r"第[一二三四五六七八九十0-9]+步|步骤[：:]|首先|然后|接着|请先|"
+    r"第[一二三四五六七八九十0-9]+步|步骤[：:]|首先|然后|接着|"
     r"先[^。！？\n]{0,10}(?:再|然后)|可以|可先|建议先|需要先"
 )
 
@@ -111,11 +114,14 @@ class Assistant:
         *,
         k: int = 8,
         max_per_doc: int = 3,
+        procedure_allowlist: set[str] | frozenset[str] | None = None,
     ) -> None:
         self.retriever = retriever
         self.provider = provider
         self.k = k
         self.max_per_doc = max_per_doc
+        # Only documents signed off after human review may expose direct steps.
+        self.procedure_allowlist = frozenset(procedure_allowlist or ())
 
     def answer(
         self,
@@ -216,7 +222,11 @@ class Assistant:
                 machine_check=machine_check,
             )
 
-        sources = build_sources(select_sources(retrieval.hits, self.max_per_doc))
+        selected = select_sources(retrieval.hits, self.max_per_doc)
+        if needs_safety_context(text):
+            safety_hits = self.retriever.safety_hits({hit.doc_id for hit in selected}, machine)
+            selected = include_safety_sources(selected, safety_hits)
+        sources = build_sources(selected)
         if is_definition_question(text):
             definition = find_hms_definition(text, sources)
             if definition is not None:
@@ -265,8 +275,10 @@ class Assistant:
                 [(drop.source, drop.reason, drop.attempt) for drop in drops],
             )
 
-        if status == "answered" and (
-            needs_guide_only(answer) or ("热床" in text and "电路" in text)
+        if (
+            status == "answered"
+            and (needs_guide_only(answer) or ("热床" in text and "电路" in text))
+            and not self._procedure_allowed(citations, sources)
         ):
             # Do not emit model-written invasive procedures until their safety
             # dependencies can be verified. Preserve only official guide titles.
@@ -288,6 +300,7 @@ class Assistant:
                 sources,
                 machine=machine,
             )
+            answer, citations = _append_safety_prerequisites(answer, citations, sources, machine)
         elif status == "insufficient_evidence":
             # Keep a specific "what is missing" explanation; markers are stripped in _finish.
             # Suggestions or repair actions still degrade to the fixed safety text.
@@ -351,6 +364,16 @@ class Assistant:
         except (ProviderError, ModelOutputError) as exc:
             LOGGER.info("citation repair failed: %s", type(exc).__name__)
             return None
+
+    def _procedure_allowed(self, citations: tuple[Citation, ...], sources: list) -> bool:
+        """Only human-reviewed documents with official safety chunks may show steps."""
+        if not self.procedure_allowlist:
+            return False
+        docs = {citation.doc_id for citation in citations}
+        if not docs or not docs <= self.procedure_allowlist:
+            return False
+        safety_docs = {source.hit.doc_id for source in safety_sources(sources)}
+        return docs <= safety_docs
 
     def _finish(
         self,
@@ -448,3 +471,49 @@ def _citations_consistent(answer: str, citations: tuple[Citation, ...], sources:
     }
     markers = set(CITATION_MARKER_RE.findall(answer))
     return bool(citations) and markers <= valid_markers
+
+
+def _safety_quote(text: str) -> str:
+    normalized = " ".join(text.split())
+    for sentence in re.split(r"(?<=[。！？；])", normalized):
+        sentence = sentence.strip()
+        if len(sentence) >= 15:
+            return sentence[:160]
+    return normalized[:160]
+
+
+def _append_safety_prerequisites(
+    answer: str,
+    citations: tuple[Citation, ...],
+    sources: list,
+    machine: str,
+) -> tuple[str, tuple[Citation, ...]]:
+    """Expose official safety/tool text next to a guide-only answer."""
+    safety = safety_sources(sources)[:3]
+    if not safety:
+        return answer, citations
+    lines: list[str] = []
+    extra: list[Citation] = []
+    seen = {citation.chunk_id for citation in citations}
+    seen_quotes: set[str] = set()
+    for source in safety:
+        quote = _safety_quote(source.hit.text)
+        if quote in seen_quotes:
+            continue
+        valid, _ = validate_citations(
+            [{"source": source.label, "quote": quote}], sources, machine=machine
+        )
+        if not valid:
+            continue
+        citation = valid[0]
+        if citation.chunk_id in seen:
+            continue
+        seen.add(citation.chunk_id)
+        seen_quotes.add(quote)
+        extra.append(citation)
+        display = citation.quote.lstrip("-* ").strip()
+        lines.append(f"- {display} [{source.label}]")
+    if not lines:
+        return answer, citations
+    answer = answer.rstrip() + "\n官方安全前提（原文核对）：\n" + "\n".join(lines)
+    return answer, tuple(citations) + tuple(extra)
