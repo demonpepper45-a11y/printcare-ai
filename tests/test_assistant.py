@@ -168,6 +168,52 @@ class AssistantTest(unittest.TestCase):
         self.assertEqual(result.status, "insufficient_evidence")
         self.assertNotIn("[S1]", result.answer)
 
+    def test_answered_with_uncertain_conclusion_downgrades(self):
+        provider = FakeProvider(
+            answered_payload(
+                answer="资料只给出 48 dB 的参考值，无法直接判断超过 60 分贝是否正常。",
+            )
+        )
+        assistant = Assistant(self.retriever, provider)
+
+        result = assistant.answer("热床不加热能判断是主板坏了吗？", "a1")
+
+        self.assertEqual(result.status, "insufficient_evidence")
+        self.assertEqual(result.citations, ())
+        self.assertNotIn("[S1]", result.answer)
+
+    def test_uncertainty_with_interleaved_adverb_also_downgrades(self):
+        provider = FakeProvider(
+            answered_payload(
+                answer="资料没有给出判定标准，因此无法据此判断是否正常。",
+            )
+        )
+        assistant = Assistant(self.retriever, provider)
+
+        result = assistant.answer("热床不加热能判断是主板坏了吗？", "a1")
+
+        self.assertEqual(result.status, "insufficient_evidence")
+
+    def test_uncertainty_with_qualified_phrase_also_downgrades(self):
+        provider = FakeProvider(
+            answered_payload(
+                answer="因此无法仅凭现有资料判断“超过 60 分贝”是否正常。",
+            )
+        )
+        assistant = Assistant(self.retriever, provider)
+
+        result = assistant.answer("热床不加热能判断是主板坏了吗？", "a1")
+
+        self.assertEqual(result.status, "insufficient_evidence")
+
+    def test_normal_answer_keeps_answered_status(self):
+        provider = FakeProvider(answered_payload())
+        assistant = Assistant(self.retriever, provider)
+
+        result = assistant.answer("A1 热床不加热怎么办？", "a1")
+
+        self.assertEqual(result.status, "answered")
+
     def test_invalid_model_output_raises(self):
         provider = FakeProvider("先断电再检查线缆。")
         assistant = Assistant(self.retriever, provider)
