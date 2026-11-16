@@ -19,9 +19,42 @@ REPAIR_ACTION_RE = re.compile(
     re.I,
 )
 
+# Exempt only explicit non-operational mentions. Every positive match is still
+# checked, so a disclaimer or quotation cannot hide a second actual request.
+QUOTE_RE = re.compile(r'“[^”]*”|「[^」]*」|"[^"\n]*"')
+NEGATED_INTENT_RE = re.compile(
+    r"(?:不打算|不准备|不想|不需要|不会|不要|不应|禁止)\s*$|"
+    r"(?:do not want to|don't want to|not planning to|will not)\s*$",
+    re.I,
+)
+DOUBLE_NEGATION_RE = re.compile(r"(?:不是|并非|不代表).{0,4}(?:不想|不打算|不准备)\s*$")
+REFERENCE_RE = re.compile(
+    r"看到|有人写|文档|说法|含义|什么意思|风险|不是要这样做|quote|meaning", re.I
+)
+PROCEDURE_REQUEST_RE = re.compile(
+    r"怎么做|如何操作|怎么操作|具体步骤|接线步骤|接线方法|怎么接线|如何接线|"
+    r"给.{0,8}(步骤|方法)|告诉.{0,8}(步骤|方法)|"
+    r"(?:怎么|如何|怎样)(?!理解|解释|看待|判断|评价|区分)|"
+    r"教我|照着做|照做|按.{0,8}操作|操作方法|教程|想这样做|"
+    r"how to|instructions|wiring",
+    re.I,
+)
+
 
 def refuses_modification(question: str) -> bool:
-    return bool(MODIFICATION_RE.search(question))
+    quotes = list(QUOTE_RE.finditer(question))
+    outside_quotes = QUOTE_RE.sub("", question)
+    asks_procedure = bool(PROCEDURE_REQUEST_RE.search(outside_quotes))
+    for match in MODIFICATION_RE.finditer(question):
+        clause_prefix = re.split(r"[，,。；;！？!?\n]", question[: match.start()])[-1]
+        negated = NEGATED_INTENT_RE.search(clause_prefix)
+        if negated and not DOUBLE_NEGATION_RE.search(clause_prefix) and not asks_procedure:
+            continue
+        quoted = any(q.start() < match.start() and match.end() < q.end() for q in quotes)
+        if quoted and REFERENCE_RE.search(outside_quotes) and not asks_procedure:
+            continue
+        return True
+    return False
 
 
 def needs_guide_only(answer: str) -> bool:
