@@ -18,6 +18,7 @@ import streamlit as st
 API_URL = os.environ.get("PRINTCARE_API_URL", "http://127.0.0.1:8000").rstrip("/")
 TIMEOUT = 120
 MACHINES = [("a1", "拓竹 A1"), ("a1_mini", "拓竹 A1 mini")]
+MACHINE_LABELS = dict(MACHINES)
 STATUS_LABELS = {
     "answered": "✅ 有依据的回答",
     "needs_clarification": "❓ 需要补充信息",
@@ -41,7 +42,28 @@ def _error_message(response: httpx.Response) -> str:
         return f"请求失败（HTTP {response.status_code}）"
 
 
+def _render_ticket(ticket: dict, expanded: bool) -> None:
+    with st.expander("故障单", expanded=expanded):
+        rows = [
+            ("机型", MACHINE_LABELS.get(ticket.get("machine"), ticket.get("machine"))),
+            ("现象", ticket.get("symptom")),
+            ("错误码", ticket.get("error_code")),
+            ("耗材", ticket.get("filament")),
+            ("供料方式", ticket.get("feed_method")),
+            ("发生阶段", ticket.get("stage")),
+            (
+                "已经尝试",
+                "；".join(ticket.get("attempted_steps") or []),
+            ),
+        ]
+        for label, value in rows:
+            st.markdown(f"**{label}**：{value or '待确认'}")
+
+
 def _render_answer(payload: dict, message_key: str) -> None:
+    ticket = payload.get("fault_ticket")
+    if ticket:
+        _render_ticket(ticket, expanded=payload.get("status") == "needs_clarification")
     st.caption(STATUS_LABELS.get(payload["status"], payload["status"]))
     st.markdown(payload["answer"] or "_（没有正文）_")
     if payload.get("follow_up_question"):

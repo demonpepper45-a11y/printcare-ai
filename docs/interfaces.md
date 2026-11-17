@@ -68,7 +68,7 @@
 
 ### MissingInformation（缺失条件）
 
-`machine_conflict`、`phenomenon`、`trigger_condition`、`filament_material`、`already_tried`、`firmware_version`、`other`。
+`machine_conflict`、`phenomenon`、`trigger_condition`、`filament_material`、`already_tried`、`firmware_version`、`error_code`、`feed_method`、`stage`、`other`。
 
 ### RefusalReason（拒答原因）
 
@@ -213,6 +213,7 @@ content_hash   = "sha256:" + sha256(normalized_document_text).hexdigest()
 | `follow_up_question` | string\|null | 是 | 仅在 `needs_clarification` 时非空 |
 | `refusal_reason` | RefusalReason\|null | 是 | 仅在 `refused` 时非空 |
 | `machine_check` | MachineCheck | 是 | 机型核对结果 |
+| `fault_ticket` | FaultTicket\|null | 否 | 从用户描述与本轮补充中提取的结构化故障单；旧会话或无法提取时为空 |
 | `session` | SessionSummary | 是 | 更新后的会话摘要 |
 
 `Citation`：
@@ -237,6 +238,21 @@ content_hash   = "sha256:" + sha256(normalized_document_text).hexdigest()
 | `requested` | Machine | 请求机型 |
 | `detected_in_question` | Machine[] | 问题文本中识别到的机型，可为空 |
 | `result` | MachineCheckResult | `mismatch` 时状态必须为 `needs_clarification` |
+
+`FaultTicket`（按用户实际描述提取，未知字段为 `null`）：
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| `machine` | Machine | 当前会话机型 |
+| `symptom` | string\|null | 现象，如“打印时不出料”；只保留用户已说内容 |
+| `error_code` | string\|null | HMS 错误码；用户明确说“没有错误码”时为 `"无"` |
+| `filament` | string\|null | PLA/PETG/ABS/TPU 等；未提及为空 |
+| `feed_method` | string\|null | `外置料架`、`AMS lite`、`AMS` 或 `未知` |
+| `stage` | string\|null | `打印中`、`首层`、`准备中`、`打印后`、`换料/装料` |
+| `attempted_steps` | string[] | 用户已尝试的步骤；可多轮累积 |
+| `flow` | string | 内部分流键：`no_extrusion`、`clog`、`heatbed`、`first_layer`、`hms`、`generic` |
+
+追问规则：只有 `no_extrusion` 且用户尚未提出具体检查/清理请求时，系统在调用模型前按顺序追问“错误码”“外置料架/AMS lite”等会影响下一步分支的字段；已追问过的字段不会重复追问。其余类别仍由模型依据资料决定是否 `needs_clarification`，并用 `missing_information` 标注原因。
 
 ### 不变量（测试与评审必须逐条覆盖）
 

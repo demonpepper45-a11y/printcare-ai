@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 
 from printcare.assistant.context import Source, format_sources
+from printcare.assistant.fault_ticket import FaultTicket
 from printcare.assistant.policy import is_definition_question
 from printcare.assistant.session import SessionSummary
 from printcare.retrieval.safety import is_safety_heading
@@ -52,6 +53,7 @@ def build_messages(
     machine: str,
     sources: Sequence[Source],
     session: SessionSummary | None = None,
+    ticket: FaultTicket | None = None,
 ) -> list[dict[str, str]]:
     parts = [f"用户机型：{machine}"]
     if session is not None:
@@ -59,6 +61,13 @@ def build_messages(
         if session.attempted_steps:
             parts.append("已尝试步骤：" + "；".join(session.attempted_steps))
     parts.append(f"用户问题：{question}")
+    if ticket is not None:
+        parts.append("当前故障单（未知字段保持待确认，不要重复询问已知信息）：")
+        parts.append(_ticket_text(ticket))
+        parts.append(
+            "回答时先用一句话确认故障单中的已知信息；若仍缺少会影响下一步判断的字段，"
+            "只追问这些字段，不要泛泛追问。"
+        )
     if is_definition_question(question):
         parts.append("本轮只解释错误码或术语的含义；不主动添加维修、拆装、接线或测量步骤。")
     if any(is_safety_heading(source.hit.heading_path) for source in sources):
@@ -73,3 +82,16 @@ def build_messages(
         {"role": "system", "content": SYSTEM_PROMPT},
         {"role": "user", "content": "\n\n".join(parts)},
     ]
+
+
+def _ticket_text(ticket: FaultTicket) -> str:
+    lines = [
+        f"机型：{ticket.machine}",
+        f"现象：{ticket.symptom or '待确认'}",
+        f"错误码：{ticket.error_code or '未知'}",
+        f"耗材：{ticket.filament or '待确认'}",
+        f"供料方式：{ticket.feed_method or '待确认'}",
+        f"发生阶段：{ticket.stage or '待确认'}",
+        f"已经尝试：{'；'.join(ticket.attempted_steps) or '待确认'}",
+    ]
+    return "\n".join(lines)

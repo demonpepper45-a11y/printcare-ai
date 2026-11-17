@@ -161,6 +161,43 @@ class AssistantTest(unittest.TestCase):
         self.assertEqual(result.status, "answered")
         self.assertIn("[S1]", result.answer)
 
+    def test_vague_no_extrusion_asks_ticket_questions_without_model_call(self):
+        provider = FakeProvider([])
+        result = Assistant(self.retriever, provider).answer("A1 打印时不出料", "a1")
+
+        self.assertEqual(result.status, "needs_clarification")
+        self.assertEqual(provider.calls, [])
+        self.assertIsNotNone(result.fault_ticket)
+        self.assertEqual(result.fault_ticket.flow, "no_extrusion")
+        self.assertEqual(result.fault_ticket.symptom, "打印时不出料")
+        self.assertIn("错误码", result.follow_up_question)
+        self.assertIn("AMS lite", result.follow_up_question)
+        self.assertEqual(set(result.missing_information), {"error_code", "feed_method"})
+
+    def test_ticket_merges_followup_answers(self):
+        session = Session.create("a1")
+        provider = FakeProvider([answered_payload()])
+        assistant = Assistant(self.retriever, provider)
+
+        first = assistant.answer("A1 打印时不出料", "a1", session)
+        second = assistant.answer("使用外置料架，没有错误码，PLA，打印时不出料", "a1", session)
+
+        self.assertEqual(first.status, "needs_clarification")
+        self.assertIsNotNone(second.fault_ticket)
+        self.assertEqual(second.fault_ticket.feed_method, "外置料架")
+        self.assertEqual(second.fault_ticket.error_code, "无")
+        self.assertEqual(second.fault_ticket.filament, "PLA")
+        self.assertEqual(second.fault_ticket.symptom, "打印时不出料")
+
+    def test_detailed_maintenance_question_still_reaches_model(self):
+        provider = FakeProvider([answered_payload()])
+        result = Assistant(self.retriever, provider).answer("A1 热床不加热怎么办？", "a1")
+
+        self.assertEqual(result.status, "answered")
+        self.assertEqual(len(provider.calls), 1)
+        self.assertIsNotNone(result.fault_ticket)
+        self.assertEqual(result.fault_ticket.flow, "heatbed")
+
     def test_machine_mismatch_skips_model_call(self):
         provider = FakeProvider([])
         assistant = Assistant(self.retriever, provider)

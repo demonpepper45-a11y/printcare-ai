@@ -111,6 +111,26 @@ class CoreApiTest(ApiTestBase):
         self.assertEqual(body["citations"][0]["machine"], "a1")
         self.assertTrue(body["session_id"].startswith("s_"))
         self.assertTrue(response.headers["X-Request-Id"].startswith("req_"))
+        self.assertEqual(body["fault_ticket"]["machine"], "a1")
+        self.assertEqual(body["fault_ticket"]["flow"], "heatbed")
+        self.assertEqual(body["fault_ticket"]["symptom"], "热床不加热")
+
+    def test_vague_no_extrusion_returns_ticket_clarification(self):
+        client = self.make_client()
+
+        response = client.post(
+            "/api/v1/chat",
+            json={"question": "A1 打印时不出料", "machine": "a1"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["status"], "needs_clarification")
+        self.assertEqual(self.provider.calls, [])
+        self.assertEqual(body["fault_ticket"]["flow"], "no_extrusion")
+        self.assertTrue(body["follow_up_question"])
+        self.assertIn("error_code", body["missing_information"])
+        self.assertIn("feed_method", body["missing_information"])
 
     def test_chat_validation_error_format(self):
         client = self.make_client()
