@@ -18,6 +18,9 @@ MissingInformation = Literal[
     "filament_material",
     "already_tried",
     "firmware_version",
+    "error_code",
+    "feed_method",
+    "stage",
     "other",
 ]
 
@@ -27,6 +30,7 @@ SESSION_PATTERN = r"^s_[A-Za-z0-9]{16,32}$"
 class CitationModel(BaseModel):
     chunk_id: str
     doc_id: str
+    source_label: str
     title: str
     source_url: str
     section_path: list[str]
@@ -41,6 +45,17 @@ class MachineCheckModel(BaseModel):
     requested: Machine
     detected_in_question: list[Machine]
     result: Literal["match", "mismatch", "unknown"]
+
+
+class FaultTicketModel(BaseModel):
+    machine: Machine
+    symptom: str | None = None
+    error_code: str | None = None
+    filament: str | None = None
+    feed_method: str | None = None
+    stage: str | None = None
+    attempted_steps: list[str] = []
+    flow: str
 
 
 class SessionModel(BaseModel):
@@ -69,6 +84,7 @@ class ChatResponse(BaseModel):
     refusal_reason: RefusalReason | None = None
     machine_check: MachineCheckModel
     session: SessionModel
+    fault_ticket: FaultTicketModel | None = None
 
 
 class SessionPatch(BaseModel):

@@ -22,6 +22,7 @@ from printcare.api.schemas import (
     ErrorDetail,
     ErrorResponse,
     FailureModel,
+    FaultTicketModel,
     FeedbackRequest,
     FeedbackResponse,
     FeedbackSummary,
@@ -304,6 +305,7 @@ def _chat_response(result: ChatResult) -> ChatResponse:
         CitationModel(
             chunk_id=citation.chunk_id,
             doc_id=citation.doc_id,
+            source_label=citation.source_label,
             title=citation.title,
             source_url=citation.source_url,
             section_path=list(citation.section_path),
@@ -330,6 +332,23 @@ def _chat_response(result: ChatResult) -> ChatResponse:
             result=result.machine_check.result,
         ),
         session=_session_model(result.session),
+        fault_ticket=_fault_ticket_model(result),
+    )
+
+
+def _fault_ticket_model(result: ChatResult) -> FaultTicketModel | None:
+    ticket = result.fault_ticket
+    if ticket is None:
+        return None
+    return FaultTicketModel(
+        machine=ticket.machine,
+        symptom=ticket.symptom,
+        error_code=ticket.error_code,
+        filament=ticket.filament,
+        feed_method=ticket.feed_method,
+        stage=ticket.stage,
+        attempted_steps=list(ticket.attempted_steps),
+        flow=ticket.flow,
     )
 
 

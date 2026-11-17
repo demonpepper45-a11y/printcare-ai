@@ -244,6 +244,7 @@ def evaluate_question(
         "citation_quotes": [citation.quote for citation in result.citations],
         "citation_sources": [
             {
+                "source_label": citation.source_label,
                 "url": citation.source_url,
                 "section": list(citation.section_path),
                 "quote": citation.quote,

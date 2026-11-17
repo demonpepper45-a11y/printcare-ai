@@ -28,6 +28,7 @@ class Session:
     machine: str
     reported_issue: str | None = None
     attempted_steps: list[str] = field(default_factory=list)
+    fault_ticket: dict[str, object] | None = None
     corrections: list[dict[str, str]] = field(default_factory=list)
     history: list[dict[str, str]] = field(default_factory=list)
     updated_at: str = ""
@@ -55,6 +56,7 @@ class Session:
         self.history.clear()
         self.reported_issue = None
         self.attempted_steps.clear()
+        self.fault_ticket = None
         self.updated_at = _now()
 
     def record_turn(self, question: str, status: str, *, record_issue: bool = True) -> None:
@@ -73,6 +75,7 @@ class Session:
             "machine": self.machine,
             "reported_issue": self.reported_issue,
             "attempted_steps": list(self.attempted_steps),
+            "fault_ticket": self.fault_ticket,
             "corrections": list(self.corrections),
             "history": list(self.history),
             "updated_at": self.updated_at,
@@ -85,6 +88,7 @@ class Session:
             machine=str(payload["machine"]),
             reported_issue=payload.get("reported_issue") or None,
             attempted_steps=[str(item) for item in payload.get("attempted_steps") or []],
+            fault_ticket=payload.get("fault_ticket") or None,
             corrections=list(payload.get("corrections") or []),
             history=list(payload.get("history") or []),
             updated_at=str(payload.get("updated_at") or ""),

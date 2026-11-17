@@ -21,6 +21,7 @@ from printcare.assistant.context import (
     validate_citations_with_audit,
 )
 from printcare.assistant.definitions import find_hms_definition
+from printcare.assistant.fault_ticket import FaultTicket, update_ticket
 from printcare.assistant.policy import (
     is_definition_question,
     needs_guide_only,
@@ -48,6 +49,9 @@ VALID_MISSING = {
     "filament_material",
     "already_tried",
     "firmware_version",
+    "error_code",
+    "feed_method",
+    "stage",
     "other",
 }
 VALID_REFUSALS = {"no_reliable_source", "out_of_scope", "unsafe_procedure", "unsupported_machine"}
@@ -102,6 +106,7 @@ class ChatResult:
     session: SessionSummary
     usage: dict[str, int] | None = None
     citation_audit: tuple[CitationDrop, ...] = ()
+    fault_ticket: FaultTicket | None = None
 
 
 class Assistant:
@@ -133,11 +138,18 @@ class Assistant:
         if not text:
             raise ValueError("question is empty")
 
-        retrieval = self.retriever.query(text, machine, limit=self.k)
-        detected = retrieval.detected_machines
         session = session or Session.create(machine)
         if session.machine != machine:
             session.correct_machine(machine)
+        ticket = update_ticket(FaultTicket.from_dict(session.fault_ticket), text, machine)
+        session.fault_ticket = ticket.to_dict()
+        retrieval_query = text
+        # A short answer such as "外置料架，没有错误码" must still search the
+        # symptom recorded earlier; otherwise retrieval loses the topic.
+        if ticket.symptom and ticket.symptom not in text and len(text) <= 40:
+            retrieval_query = f"{ticket.symptom}\n{text}"
+        retrieval = self.retriever.query(retrieval_query, machine, limit=self.k)
+        detected = retrieval.detected_machines
         # Resolve an elliptical follow-up before retrieval, not just in the
         # model prompt. Check the current question first so context cannot hide
         # a conflicting or unsupported model mention.
@@ -199,6 +211,22 @@ class Assistant:
                 refusal="unsafe_procedure",
                 machine_check=machine_check,
             )
+        if ticket.should_clarify(text):
+            missing = ticket.missing_information()
+            follow_up = ticket.clarification_text()
+            clarifying = ticket.mark_asked()
+            session.fault_ticket = clarifying.to_dict()
+            return self._finish(
+                session,
+                text,
+                status="needs_clarification",
+                answer="",
+                citations=(),
+                missing=missing,
+                follow_up=follow_up,
+                refusal=None,
+                machine_check=machine_check,
+            )
         # A conjunction is a request about both topics. Search each explicitly;
         # do not let the dominant topic consume the entire source window.
         combined_query = retrieval.query
@@ -246,7 +274,8 @@ class Assistant:
                         refusal=None,
                         machine_check=machine_check,
                     )
-        messages = build_messages(text, machine, sources, session.summary())
+        prompt_ticket = ticket if ticket.flow == "no_extrusion" else None
+        messages = build_messages(text, machine, sources, session.summary(), prompt_ticket)
         raw = self.provider.complete(messages)
         payload = parse_model_payload(raw)
         status, answer, citations, missing, follow_up, refusal, drops = self._interpret(
@@ -422,6 +451,7 @@ class Assistant:
             session=session.summary(),
             usage=usage,
             citation_audit=audit,
+            fault_ticket=FaultTicket.from_dict(session.fault_ticket),
         )
 
 

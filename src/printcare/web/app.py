@@ -18,6 +18,7 @@ import streamlit as st
 API_URL = os.environ.get("PRINTCARE_API_URL", "http://127.0.0.1:8000").rstrip("/")
 TIMEOUT = 120
 MACHINES = [("a1", "拓竹 A1"), ("a1_mini", "拓竹 A1 mini")]
+MACHINE_LABELS = dict(MACHINES)
 STATUS_LABELS = {
     "answered": "✅ 有依据的回答",
     "needs_clarification": "❓ 需要补充信息",
@@ -28,7 +29,9 @@ STATUS_LABELS = {
 
 def _request(method: str, path: str, **kwargs) -> httpx.Response | None:
     try:
-        return httpx.request(method, f"{API_URL}{path}", timeout=TIMEOUT, **kwargs)
+        # The UI always talks to the configured local API; do not route
+        # 127.0.0.1 through a system HTTP proxy.
+        return httpx.request(method, f"{API_URL}{path}", timeout=TIMEOUT, trust_env=False, **kwargs)
     except httpx.HTTPError as exc:
         st.error(f"无法连接 API：{type(exc).__name__}")
         return None
@@ -41,7 +44,28 @@ def _error_message(response: httpx.Response) -> str:
         return f"请求失败（HTTP {response.status_code}）"
 
 
+def _render_ticket(ticket: dict, expanded: bool) -> None:
+    with st.expander("故障单", expanded=expanded):
+        rows = [
+            ("机型", MACHINE_LABELS.get(ticket.get("machine"), ticket.get("machine"))),
+            ("现象", ticket.get("symptom")),
+            ("错误码", ticket.get("error_code")),
+            ("耗材", ticket.get("filament")),
+            ("供料方式", ticket.get("feed_method")),
+            ("发生阶段", ticket.get("stage")),
+            (
+                "已经尝试",
+                "；".join(ticket.get("attempted_steps") or []),
+            ),
+        ]
+        for label, value in rows:
+            st.markdown(f"**{label}**：{value or '待确认'}")
+
+
 def _render_answer(payload: dict, message_key: str) -> None:
+    ticket = payload.get("fault_ticket")
+    if ticket:
+        _render_ticket(ticket, expanded=payload.get("status") == "needs_clarification")
     st.caption(STATUS_LABELS.get(payload["status"], payload["status"]))
     st.markdown(payload["answer"] or "_（没有正文）_")
     if payload.get("follow_up_question"):
@@ -50,8 +74,9 @@ def _render_answer(payload: dict, message_key: str) -> None:
         st.warning(f"拒答原因：{payload['refusal_reason']}")
     for index, citation in enumerate(payload.get("citations") or [], start=1):
         heading = " > ".join(citation.get("section_path") or []) or "-"
-        label = f"[{index}] {citation['title']} · {heading}"
-        with st.expander(label):
+        label = citation.get("source_label") or f"#{index}"
+        title = f"[{label}] {citation['title']} · {heading}"
+        with st.expander(title):
             st.write(citation["quote"])
             st.markdown(f"[打开官方原文]({citation['source_url']})")
             st.caption(f"官方更新时间：{citation.get('official_updated_at') or '未知'}")
