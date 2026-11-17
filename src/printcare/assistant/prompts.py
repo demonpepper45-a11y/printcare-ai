@@ -62,12 +62,14 @@ def build_messages(
             parts.append("已尝试步骤：" + "；".join(session.attempted_steps))
     parts.append(f"用户问题：{question}")
     if ticket is not None:
-        parts.append("当前故障单（未知字段保持待确认，不要重复询问已知信息）：")
+        parts.append("当前故障单（已知信息）：")
         parts.append(_ticket_text(ticket))
-        parts.append(
-            "回答时先用一句话确认故障单中的已知信息；若仍缺少会影响下一步判断的字段，"
-            "只追问这些字段，不要泛泛追问。"
-        )
+        parts.append("回答时先用一句话确认故障单中的已知信息。")
+        if ticket.asked:
+            parts.append(
+                "关键分支信息已收集；不要再追问耗材、阶段等非阻塞项，"
+                "直接依据官方资料给出下一步排查方向或官方指南入口。"
+            )
     if is_definition_question(question):
         parts.append("本轮只解释错误码或术语的含义；不主动添加维修、拆装、接线或测量步骤。")
     if any(is_safety_heading(source.hit.heading_path) for source in sources):

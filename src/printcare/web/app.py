@@ -29,7 +29,9 @@ STATUS_LABELS = {
 
 def _request(method: str, path: str, **kwargs) -> httpx.Response | None:
     try:
-        return httpx.request(method, f"{API_URL}{path}", timeout=TIMEOUT, **kwargs)
+        # The UI always talks to the configured local API; do not route
+        # 127.0.0.1 through a system HTTP proxy.
+        return httpx.request(method, f"{API_URL}{path}", timeout=TIMEOUT, trust_env=False, **kwargs)
     except httpx.HTTPError as exc:
         st.error(f"无法连接 API：{type(exc).__name__}")
         return None

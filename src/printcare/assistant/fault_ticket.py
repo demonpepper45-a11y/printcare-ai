@@ -98,7 +98,8 @@ class FaultTicket:
         ]
         if not questions:
             return ""
-        joined = "；".join(f"{index}）{question}" for index, question in enumerate(questions, 1))
+        questions = [question.rstrip("？?；; ") + "？" for question in questions]
+        joined = " ".join(f"{index}）{question}" for index, question in enumerate(questions, 1))
         return f"为了继续排查，请先确认：{joined}"
 
     def mark_asked(self) -> FaultTicket:

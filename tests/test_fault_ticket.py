@@ -3,6 +3,7 @@
 import unittest
 
 from printcare.assistant.fault_ticket import FaultTicket, update_ticket
+from printcare.assistant.prompts import build_messages
 
 
 class FaultTicketExtractionTest(unittest.TestCase):
@@ -88,6 +89,12 @@ class FaultTicketExtractionTest(unittest.TestCase):
         self.assertEqual(switched.symptom, "热床不升温")
         self.assertEqual(switched.flow, "heatbed")
         self.assertIsNone(switched.feed_method)
+
+    def test_prompt_stops_asking_after_key_fields(self):
+        ticket = update_ticket(None, "A1 打印时不出料", "a1").mark_asked()
+        messages = build_messages("使用外置料架，没有错误码", "a1", [], None, ticket)
+
+        self.assertIn("不要再追问耗材", messages[1]["content"])
 
     def test_serialization_round_trip(self):
         ticket = update_ticket(None, "A1 热床不升温，已经断电", "a1")
