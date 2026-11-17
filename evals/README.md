@@ -65,7 +65,7 @@ python evals/run_assistant_eval.py --db runtime/printcare.sqlite3 --k 8
 
 自动判定：回答状态是否与预期一致、`answered` 是否引用预期文档、是否出现禁止机型文档、
 `refused` 的原因是否符合预期。结果写入 `runtime/assistant-eval.json`，并输出 token 与成本估算。
-最新50题结果及逐题待审清单见[扩充记录](expansion-50-2026-11-16.md)；早期逐题AI复核见 [2026-11-16 验收记录](acceptance-2026-11-16.md)；[早期回答基线](assistant-baseline.md)保留历史。
+最新全量结果见[2026-11-17 50题评估记录](full-50-2026-11-17.md)：50通过/0失败/0跳过（自动判定，20题指南模式），**不代表专业人工验收通过**。上一轮43/7/0与逐题复核见[50题扩充记录](expansion-50-2026-11-16.md)；早期逐题AI复核见[2026-11-16 验收记录](acceptance-2026-11-16.md)；[早期回答基线](assistant-baseline.md)保留历史。
 
 多轮题现按 `context_turns` 在同一个真实 Session 中逐轮执行，再评估主问题。
 任一前置轮次失败则整题失败，缺少上下文配置也判失败，不能静默跳过。
