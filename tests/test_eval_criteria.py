@@ -16,6 +16,7 @@ QUESTIONS = Path(__file__).resolve().parents[1] / "evals" / "questions.jsonl"
 
 def citation(path: str):
     return SimpleNamespace(
+        source_label="S1",
         source_url=f"https://wiki.bambulab.com/zh/{path}",
         section_path=["章节"],
         quote="引用短句",

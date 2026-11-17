@@ -55,6 +55,7 @@ class AssistantTest(unittest.TestCase):
         self.assertEqual(result.status, "answered")
         self.assertEqual(len(result.citations), 1)
         self.assertEqual(result.citations[0].machine, "a1")
+        self.assertEqual(result.citations[0].source_label, "S1")
         self.assertEqual(result.machine_check.result, "match")
         self.assertEqual(result.session.reported_issue, "A1 热床不加热怎么办？")
         self.assertIsNotNone(result.usage)

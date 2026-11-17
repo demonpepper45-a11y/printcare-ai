@@ -39,6 +39,7 @@ class Source:
 class Citation:
     chunk_id: str
     doc_id: str
+    source_label: str
     title: str
     source_url: str
     section_path: tuple[str, ...]
@@ -212,6 +213,7 @@ def validate_citations_with_audit(
             Citation(
                 chunk_id=hit.chunk_id,
                 doc_id=hit.doc_id,
+                source_label=label,
                 title=hit.title,
                 source_url=hit.source_url,
                 section_path=hit.heading_path,

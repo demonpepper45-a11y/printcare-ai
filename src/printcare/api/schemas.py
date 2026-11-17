@@ -30,6 +30,7 @@ SESSION_PATTERN = r"^s_[A-Za-z0-9]{16,32}$"
 class CitationModel(BaseModel):
     chunk_id: str
     doc_id: str
+    source_label: str
     title: str
     source_url: str
     section_path: list[str]

@@ -222,6 +222,7 @@ content_hash   = "sha256:" + sha256(normalized_document_text).hexdigest()
 |---|---|---|---|---|
 | `chunk_id` | string | 是 | 片段标识 | 可定位到原文与版本 |
 | `doc_id` | string | 是 | 文档标识 | |
+| `source_label` | string | 是 | `S1`… | 对应正文 `[S#]` 标记，页面引用卡片使用同一标签 |
 | `title` | string | 是 | 原文标题 | 不翻译 |
 | `source_url` | string(uri) | 是 | 官方完整 URL | |
 | `section_path` | string[] | 是 | 可为空 | 与片段 `heading_path` 一致 |

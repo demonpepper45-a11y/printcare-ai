@@ -109,6 +109,7 @@ class CoreApiTest(ApiTestBase):
         self.assertEqual(body["status"], "answered")
         self.assertEqual(len(body["citations"]), 1)
         self.assertEqual(body["citations"][0]["machine"], "a1")
+        self.assertTrue(body["citations"][0]["source_label"].startswith("S"))
         self.assertTrue(body["session_id"].startswith("s_"))
         self.assertTrue(response.headers["X-Request-Id"].startswith("req_"))
         self.assertEqual(body["fault_ticket"]["machine"], "a1")

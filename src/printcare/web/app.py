@@ -74,8 +74,9 @@ def _render_answer(payload: dict, message_key: str) -> None:
         st.warning(f"拒答原因：{payload['refusal_reason']}")
     for index, citation in enumerate(payload.get("citations") or [], start=1):
         heading = " > ".join(citation.get("section_path") or []) or "-"
-        label = f"[{index}] {citation['title']} · {heading}"
-        with st.expander(label):
+        label = citation.get("source_label") or f"#{index}"
+        title = f"[{label}] {citation['title']} · {heading}"
+        with st.expander(title):
             st.write(citation["quote"])
             st.markdown(f"[打开官方原文]({citation['source_url']})")
             st.caption(f"官方更新时间：{citation.get('official_updated_at') or '未知'}")

@@ -305,6 +305,7 @@ def _chat_response(result: ChatResult) -> ChatResponse:
         CitationModel(
             chunk_id=citation.chunk_id,
             doc_id=citation.doc_id,
+            source_label=citation.source_label,
             title=citation.title,
             source_url=citation.source_url,
             section_path=list(citation.section_path),
